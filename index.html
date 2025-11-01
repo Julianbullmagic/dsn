@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Performer Cooperative</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header>
+        <h1>Democratic Social Network</h1>
+        <div class="header-controls">
+            <nav>
+                <ul class="tabs">
+                    <li class="tab active" data-tab="news-feed">News Feed</li>
+                    <li class="tab" data-tab="suggestions">Suggestions</li>
+                    <li class="tab" data-tab="referenda">Referenda</li>
+                    <li class="tab" data-tab="elections">Elections</li>
+                    <li><a class="nav-link" href="/login" id="login-link">Login</a></li>
+                    <li><a class="nav-link" href="/register" id="register-link">Register</a></li>
+                </ul>
+            </nav>
+            <button id="logout-btn" class="logout-btn" style="display: none;">Logout</button>
+        </div>
+    </header>
+
+    <main>
+        <!-- Welcome Section for non-logged-in users -->
+        <section id="welcome-section" class="welcome-section">
+            <div class="welcome-content">
+                <h2>Welcome to Democratic Social Network</h2>
+                <div class="description">
+                    <p>Social Networks should be democratic. Currently they are not, they are highly autocratic with people like emperor Zuckerberg at the top overtly censoring Facebook according to his own personal social engineering goals. Likewise, admins of groups tend to be autocrats, they are not elected or accountable in any way, can delete or block any post, comment or member with no consequences. Group members are not involved in creating or enforcing group rules. They're called social networks but let's face it, they're pretty anti-social and actually outright misanthropic. Cyber-bullying is rampant with little meaningful means of keeping it in check except in more extreme cases where police might get involved.</p>
+                    
+                    <p>We deserve better, we deserve a democratic social network that actually fosters communities in a real meaningful way. One that doesn't promote low self esteem and social anxiety. One where you don't have to worry about being cancelled or ostracized for saying things that threaten powerful people, where such criticism is actively encouraged. We need a social media platform where people can actually have vigorous debates.</p>
+                    
+                    <div class="auth-buttons">
+                        <a href="/login" class="auth-btn login-btn">Login</a>
+                        <a href="/register" class="auth-btn register-btn">Register</a>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- News Feed Tab -->
+        <section id="news-feed" class="tab-content active">
+            <h2>News Feed</h2>
+            <div class="news-feed-container">
+                <div class="post-form">
+                    <textarea placeholder="Share something with the community..."></textarea>
+                    <button class="post-btn">Post</button>
+                </div>
+                <div class="news-posts">
+                    <!-- News posts will be loaded here -->
+                </div>
+            </div>
+        </section>
+
+        <!-- Suggestions Tab -->
+        <section id="suggestions" class="tab-content">
+            <h2>Suggestions</h2>
+            <div class="suggestions-container">
+                <div class="suggestion-form">
+                    <input type="text" placeholder="Title of your suggestion" class="suggestion-title">
+                    <textarea placeholder="Describe your suggestion in detail..."></textarea>
+                    <button class="submit-suggestion-btn">Submit Suggestion</button>
+                </div>
+                <div class="suggestions-list">
+                    <!-- Suggestions will be loaded here -->
+                </div>
+            </div>
+        </section>
+
+        <!-- Referenda Tab -->
+        <section id="referenda" class="tab-content">
+            <h2>Referenda</h2>
+            <div class="referenda-container">
+                <!-- Referenda will be loaded here -->
+                <!-- Example of referendum with approval status -->
+                <!-- 
+                <div class="referendum-item">
+                    <h3>Referendum Title</h3>
+                    <p>Description of the referendum...</p>
+                    <div class="referendum-status">
+                        <span class="status approved">Approved</span>
+                    </div>
+                    <div class="referendum-votes">
+                        <span>Yes: 65</span>
+                        <span>No: 25</span>
+                    </div>
+                </div>
+                -->
+            </div>
+        </section>
+
+        <!-- Elections Tab -->
+        <section id="elections" class="tab-content">
+            <h2>Admin Elections</h2>
+            <div class="elections-container">
+                <div class="admin-info">
+                    <h3>Current Admins</h3>
+                    <div class="current-admins">
+                        <!-- Current admins will be loaded here -->
+                    </div>
+                </div>
+                <div class="users-list">
+                    <h3>All Users</h3>
+                    <p>Click on a user to vote for them as an admin. Top 3 voted users become admins.</p>
+                    <div class="users-container">
+                        <!-- Users will be loaded here -->
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        
+
+    </main>
+
+    <!-- Chat Bar -->
+    <div class="chat-bar collapsed" id="chat-bar">
+        <div class="chat-bar-header">
+            <span class="chat-bar-title">Chat</span>
+            <div class="chat-bar-controls">
+                <button class="toggle-chat" id="toggle-chat">−</button>
+            </div>
+        </div>
+        <div class="chat-bar-content">
+            <div class="referendum-tabs">
+                <ul class="chat-tabs">
+                    <li class="chat-tab active" data-room="general">General</li>
+                    <!-- Referendum-specific chat tabs will be added here -->
+                </ul>
+            </div>
+            <div class="chat-messages">
+                <div class="messages" id="general-chat">
+                    <!-- Messages will be loaded here -->
+                </div>
+            </div>
+            <div class="chat-input">
+                <input type="text" placeholder="Type your message..." id="message-input">
+                <button id="send-message">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

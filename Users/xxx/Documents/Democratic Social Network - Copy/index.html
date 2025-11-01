@@ -1,0 +1,55 @@
+<!-- ... existing code ... -->
+<!-- Login and Register Tabs -->
+<section id="auth" class="tab-content">
+    <h2>Authentication</h2>
+    <div class="auth-container">
+        <!-- Login Form -->
+        <div id="login-form-container" class="form-container active">
+            <h3>Login</h3>
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="login-email">Email:</label>
+                    <input type="email" id="login-email" name="email" required>
+                </div>
+                <div class="form-group">
+                    <label for="login-password">Password:</label>
+                    <input type="password" id="login-password" name="password" required>
+                </div>
+                <button type="submit" class="login-btn">Login</button>
+            </form>
+            <div id="login-message"></div>
+        </div>
+
+        <!-- Register Form -->
+        <div id="register-form-container" class="form-container">
+            <h3>Register</h3>
+            <form id="register-form">
+                <div class="form-group">
+                    <label for="username">Username:</label>
+                    <input type="text" id="username" name="username" required>
+                </div>
+                <div class="form-group">
+                    <label for="email">Email:</label>
+                    <input type="email" id="email" name="email" required>
+                </div>
+                <div class="form-group">
+                    <label for="password">Password:</label>
+                    <input type="password" id="password" name="password" required>
+                </div>
+                <div class="form-group">
+                    <label for="confirm-password">Confirm Password:</label>
+                    <input type="password" id="confirm-password" name="confirm-password" required>
+                </div>
+                <button type="submit" class="register-btn">Register</button>
+            </form>
+            <div id="register-message"></div>
+        </div>
+
+        <!-- Toggle between Login and Register -->
+        <div class="toggle-auth">
+            <button id="toggle-login">Login</button>
+            <button id="toggle-register">Register</button>
+        </div>
+    </div>
+</section>
+<!-- ... existing code ... -->
