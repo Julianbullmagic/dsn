@@ -41,7 +41,7 @@ Navigate to the "Table Editor" in the left sidebar and create the following tabl
 CREATE TABLE users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   username TEXT UNIQUE NOT NULL,
-  email TEXT UNIQUE NOT NULL,
+  email TEXT UNIQUE NOT NULL, -- Encrypted email address using AES encryption
   password TEXT NOT NULL,
   created_at TIMESTAMP DEFAULT NOW(),
   admin_votes INTEGER DEFAULT 0,
