@@ -151,6 +151,36 @@ main {
     background-color: #219653;
 }
 
+/* Google Form Container Styles */
+.google-form-container {
+    margin: 2rem 0;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.google-form-container iframe {
+    border: none;
+    width: 100%;
+    min-height: 600px;
+}
+
+/* Welcome Content for Logged-in Users */
+.welcome-content-logged-in {
+    background-color: white;
+    border-radius: 8px;
+    padding: 2rem;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    margin-top: 2rem;
+}
+
+.welcome-content-logged-in h2 {
+    text-align: center;
+    color: #2c3e50;
+    margin-bottom: 2rem;
+    font-size: 2rem;
+}
+
 .tab-content {
     display: none;
 }

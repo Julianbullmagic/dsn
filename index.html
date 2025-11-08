@@ -25,19 +25,23 @@
     </header>
 
     <main>
-        <!-- Welcome Section for non-logged-in users -->
+        <!-- Google Form Section for non-logged-in users -->
         <section id="welcome-section" class="welcome-section">
             <div class="welcome-content">
                 <h2>Welcome to Democratic Social Network</h2>
-                <div class="description">
-                    <p>Social Networks should be democratic. Currently they are not, they are highly autocratic with people like emperor Zuckerberg at the top overtly censoring Facebook according to his own personal social engineering goals. Likewise, admins of groups tend to be autocrats, they are not elected or accountable in any way, can delete or block any post, comment or member with no consequences. Group members are not involved in creating or enforcing group rules. They're called social networks but let's face it, they're pretty anti-social and actually outright misanthropic. Cyber-bullying is rampant with little meaningful means of keeping it in check except in more extreme cases where police might get involved.</p>
-                    
-                    <p>We deserve better, we deserve a democratic social network that actually fosters communities in a real meaningful way. One that doesn't promote low self esteem and social anxiety. One where you don't have to worry about being cancelled or ostracized for saying things that threaten powerful people, where such criticism is actively encouraged. We need a social media platform where people can actually have vigorous debates.</p>
-                    
-                    <div class="auth-buttons">
-                        <a href="/login" class="auth-btn login-btn">Login</a>
-                        <a href="/register" class="auth-btn register-btn">Register</a>
-                    </div>
+                <div class="google-form-container">
+                    <iframe src="https://docs.google.com/forms/d/e/1FAIpQLSf55aKQR7dWxeiBEw9ISAEHg-pq-Ww_FwWzKHx1VRlVvoNv3w/viewform?usp=dialog"
+                            width="100%"
+                            height="600"
+                            frameborder="0"
+                            marginheight="0"
+                            marginwidth="0">
+                        Loading...
+                    </iframe>
+                </div>
+                <div class="auth-buttons">
+                    <a href="/login" class="auth-btn login-btn">Login</a>
+                    <a href="/register" class="auth-btn register-btn">Register</a>
                 </div>
             </div>
         </section>
@@ -52,6 +56,16 @@
                 </div>
                 <div class="news-posts">
                     <!-- News posts will be loaded here -->
+                </div>
+            </div>
+            
+            <!-- Welcome Content for logged-in users -->
+            <div id="welcome-content-logged-in" class="welcome-content-logged-in" style="display: none;">
+                <h2>Welcome to Democratic Social Network</h2>
+                <div class="description">
+                    <p>Social Networks should be democratic. Currently they are not, they are highly autocratic with people like emperor Zuckerberg at the top overtly censoring Facebook according to his own personal social engineering goals. Likewise, admins of groups tend to be autocrats, they are not elected or accountable in any way, can delete or block any post, comment or member with no consequences. Group members are not involved in creating or enforcing group rules. They're called social networks but let's face it, they're pretty anti-social and actually outright misanthropic. Cyber-bullying is rampant with little meaningful means of keeping it in check except in more extreme cases where police might get involved.</p>
+                    
+                    <p>We deserve better, we deserve a democratic social network that actually fosters communities in a real meaningful way. One that doesn't promote low self esteem and social anxiety. One where you don't have to worry about being cancelled or ostracized for saying things that threaten powerful people, where such criticism is actively encouraged. We need a social media platform where people can actually have vigorous debates.</p>
                 </div>
             </div>
         </section>

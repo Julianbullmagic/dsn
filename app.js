@@ -366,6 +366,7 @@ function updateUIForAuthStatus(isLoggedIn) {
     const mainTabs = document.querySelectorAll('.tab');
     const mainContents = document.querySelectorAll('.tab-content');
     const welcomeSection = document.getElementById('welcome-section');
+    const welcomeContentLoggedIn = document.getElementById('welcome-content-logged-in');
     const chatBar = document.getElementById('chat-bar');
     
     if (isLoggedIn) {
@@ -373,6 +374,7 @@ function updateUIForAuthStatus(isLoggedIn) {
         if (registerLink) registerLink.style.display = 'none';
         if (logoutBtn) logoutBtn.style.display = 'block';
         if (welcomeSection) welcomeSection.style.display = 'none';
+        if (welcomeContentLoggedIn) welcomeContentLoggedIn.style.display = 'block';
         if (chatBar) chatBar.style.display = 'block';
 
         // Show main navigation and ensure only news-feed is active by default
@@ -387,6 +389,7 @@ function updateUIForAuthStatus(isLoggedIn) {
         if (registerLink) registerLink.style.display = 'inline-block';
         if (logoutBtn) logoutBtn.style.display = 'none';
         if (welcomeSection) welcomeSection.style.display = 'block';
+        if (welcomeContentLoggedIn) welcomeContentLoggedIn.style.display = 'none';
         if (chatBar) chatBar.style.display = 'none';
 
         // Hide main navigation and contents until login
