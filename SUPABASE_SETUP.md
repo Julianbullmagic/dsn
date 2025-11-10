@@ -41,7 +41,7 @@ Navigate to the "Table Editor" in the left sidebar and create the following tabl
 CREATE TABLE users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   username TEXT UNIQUE NOT NULL,
-  email TEXT UNIQUE NOT NULL, -- Encrypted email address using AES encryption
+  email TEXT UNIQUE NOT NULL,
   password TEXT NOT NULL,
   created_at TIMESTAMP DEFAULT NOW(),
   admin_votes INTEGER DEFAULT 0,
@@ -126,6 +126,18 @@ CREATE TABLE booking_leads (
   duration TEXT NOT NULL,
   description TEXT NOT NULL,
   created_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+### Admin Votes Table
+
+```sql
+CREATE TABLE admin_votes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  voter_id UUID REFERENCES users(id),
+  candidate_id UUID REFERENCES users(id),
+  created_at TIMESTAMP DEFAULT NOW(),
+  UNIQUE(voter_id, candidate_id) -- Each voter can only vote once for each candidate
 );
 ```
 

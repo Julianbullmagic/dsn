@@ -7,7 +7,6 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const { initSupabase } = require('./supabaseClient');
-const { encryptEmail, decryptEmail, encryptUserEmail, decryptUserEmail, decryptUsersEmails } = require('./encryption');
 
 const app = express();
 const server = http.createServer(app);
@@ -131,52 +130,127 @@ io.on('connection', (socket) => {
 // Registration endpoint with email verification
 app.post('/api/register', async (req, res) => {
     try {
+        console.log('=== REGISTRATION ATTEMPT ===');
         const { username, email, password } = req.body;
+        console.log('Username provided:', username);
+        console.log('Email provided:', email);
+        console.log('Password provided:', password ? '***' : 'undefined');
         
         // Validate input
         if (!username || !email || !password) {
+            console.log('Validation failed: missing required fields');
             return res.status(400).json({ error: 'Username, email, and password are required' });
         }
         
-        // Encrypt email for checking if user already exists
-        const encryptedEmail = encryptEmail(email);
+        console.log('Supabase client status:', supabase ? 'initialized' : 'not initialized');
+        if (supabase && supabase.__mock) {
+            console.log('WARNING: Using mock Supabase client');
+        }
+        
+        // Convert email to lowercase for checking if user already exists
+        console.log('Converting email to lowercase for database lookup...');
+        const normalizedEmail = email.toLowerCase();
+        console.log('Normalized email:', normalizedEmail);
         
         // Check if user already exists
+        console.log('Querying users table for existing user...');
         const { data: existingUsers, error: fetchError } = await supabase
             .from('users')
             .select('*')
-            .or(`email.eq.${encryptedEmail},username.eq.${username}`);
+            .or(`email.eq.${normalizedEmail},username.eq.${username}`);
         
-        if (fetchError) throw fetchError;
+        console.log('Database query result:');
+        console.log('- Error:', fetchError);
+        console.log('- Existing users found:', existingUsers ? existingUsers.length : 0);
+        
+        if (fetchError) {
+            console.log('Database error details:', {
+                code: fetchError.code,
+                message: fetchError.message,
+                details: fetchError.details,
+                hint: fetchError.hint
+            });
+            
+            // Special handling for PGRST116 - typically means "no rows returned" when using .single()
+            if (fetchError.code === 'PGRST116') {
+                console.log('Users table query returned no rows (PGRST116) - this is expected for new registrations');
+                // Don't throw error for PGRST116 in registration check - it just means no existing users found
+            } else {
+                throw fetchError;
+            }
+        }
         
         if (existingUsers.length > 0) {
+            console.log('Registration failed: user already exists');
             return res.status(400).json({ error: 'Username or email already exists' });
         }
         
+        console.log('Hashing password...');
         // Hash password
         const saltRounds = 10;
         const hashedPassword = await bcrypt.hash(password, saltRounds);
+        console.log('Password hashed successfully');
         
-        // Insert user into database with encrypted email
+        console.log('Inserting new user into database...');
+        // Insert user into database with normalized email
         const { data: newUser, error: insertError } = await supabase
             .from('users')
             .insert([
                 {
                     username,
-                    email: encryptedEmail,
+                    email: normalizedEmail,
                     password: hashedPassword
                 }
             ])
             .select()
             .single();
         
-        if (insertError) throw insertError;
+        console.log('Database insert result:');
+        console.log('- Error:', insertError);
+        console.log('- New user created:', newUser ? 'yes' : 'no');
+        
+        if (insertError) {
+            console.log('Database error details:', {
+                code: insertError.code,
+                message: insertError.message,
+                details: insertError.details,
+                hint: insertError.hint
+            });
+            
+            // Special handling for PGRST116 - table doesn't exist
+            if (insertError.code === 'PGRST116') {
+                console.log('ERROR: users table does not exist in the database!');
+                console.log('Please run the database setup script or create the tables manually.');
+                console.log('See SUPABASE_SETUP.md for SQL commands to create the required tables.');
+                return res.status(500).json({
+                    error: 'Database not properly configured. Please contact the administrator to set up the database tables.',
+                    code: 'TABLE_NOT_FOUND'
+                });
+            }
+            
+            throw insertError;
+        }
+        
+        console.log('Registration successful for user:', username);
+        
+        // Send verification email
+        try {
+            await sendVerificationEmail(normalizedEmail, username);
+            console.log('Verification email sent to:', normalizedEmail);
+        } catch (emailError) {
+            console.error('Failed to send verification email:', emailError);
+            // Still return success even if email fails, but log the error
+        }
         
         res.status(201).json({
             message: 'User registered successfully.'
         });
     } catch (error) {
-        console.error('Registration error:', error);
+        console.error('=== REGISTRATION ERROR ===');
+        console.error('Error type:', error.constructor.name);
+        console.error('Error message:', error.message);
+        console.error('Error stack:', error.stack);
+        console.error('Full error object:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -184,56 +258,94 @@ app.post('/api/register', async (req, res) => {
 // Login endpoint
 app.post('/api/login', async (req, res) => {
     try {
+        console.log('=== LOGIN ATTEMPT ===');
         const { email, password } = req.body;
+        console.log('Email provided:', email);
+        console.log('Password provided:', password ? '***' : 'undefined');
         
         // Validate input
         if (!email || !password) {
+            console.log('Validation failed: missing email or password');
             return res.status(400).json({ error: 'Email and password are required' });
         }
         
-        // Encrypt email to search in database
-        const encryptedEmail = encryptEmail(email);
+        console.log('Supabase client status:', supabase ? 'initialized' : 'not initialized');
+        if (supabase && supabase.__mock) {
+            console.log('WARNING: Using mock Supabase client');
+        }
+        
+        // Convert email to lowercase to search in database
+        console.log('Converting email to lowercase for database lookup...');
+        const normalizedEmail = email.toLowerCase();
+        console.log('Normalized email:', normalizedEmail);
         
         // Find user
+        console.log('Querying users table...');
         const { data: user, error } = await supabase
             .from('users')
             .select('*')
-            .eq('email', encryptedEmail)
+            .eq('email', normalizedEmail)
             .single();
         
-        if (error) throw error;
+        console.log('Database query result:');
+        console.log('- Error:', error);
+        console.log('- User data:', user ? 'found' : 'not found');
+        
+        if (error) {
+            console.log('Database error details:', {
+                code: error.code,
+                message: error.message,
+                details: error.details,
+                hint: error.hint
+            });
+            
+            // Special handling for PGRST116 - typically means "no rows returned" when using .single()
+            if (error.code === 'PGRST116') {
+                console.log('User not found in database (PGRST116: no rows returned)');
+                return res.status(401).json({ error: 'Invalid email or password' });
+            }
+            
+            throw error;
+        }
         
         if (!user) {
+            console.log('Authentication failed: user not found');
             return res.status(401).json({ error: 'Invalid email or password' });
         }
         
+        console.log('User found, verifying password...');
         // Verify password
         const isValidPassword = await bcrypt.compare(password, user.password);
+        console.log('Password verification result:', isValidPassword ? 'valid' : 'invalid');
+        
         if (!isValidPassword) {
             return res.status(401).json({ error: 'Invalid email or password' });
         }
         
-        // Decrypt email for JWT token and response
-        const decryptedEmail = decryptEmail(user.email);
-        
         // Generate JWT token
+        console.log('Generating JWT token...');
         const token = jwt.sign(
-            { id: user.id, username: user.username, email: decryptedEmail },
+            { id: user.id, username: user.username, email: user.email },
             JWT_SECRET,
             { expiresIn: '7d' }
         );
+        console.log('JWT token generated successfully');
         
-        // Remove sensitive data and decrypt email for response
+        // Remove sensitive data for response
         const { password: _, ...userWithoutPassword } = user;
-        userWithoutPassword.email = decryptedEmail;
         
+        console.log('Login successful for user:', user.username);
         res.json({
             user: userWithoutPassword,
             token,
             message: 'Login successful'
         });
     } catch (error) {
-        console.error('Login error:', error);
+        console.error('=== LOGIN ERROR ===');
+        console.error('Error type:', error.constructor.name);
+        console.error('Error message:', error.message);
+        console.error('Error stack:', error.stack);
+        console.error('Full error object:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -268,6 +380,57 @@ app.post('/api/logout', authenticateToken, async (req, res) => {
     }
 });
 
+// Email verification endpoint
+app.get('/api/verify-email', async (req, res) => {
+    try {
+        const { token } = req.query;
+        
+        if (!token) {
+            return res.status(400).send('Verification token is required');
+        }
+        
+        // Verify the token
+        const decoded = jwt.verify(token, JWT_SECRET);
+        
+        if (!decoded || !decoded.email) {
+            return res.status(400).send('Invalid or expired verification token');
+        }
+        
+        // Update user's email verification status in database
+        const { error } = await supabase
+            .from('users')
+            .update({ email_verified: true, email_verification_token: null })
+            .eq('email', decoded.email.toLowerCase());
+        
+        if (error) {
+            console.error('Error updating email verification status:', error);
+            return res.status(500).send('Error verifying email');
+        }
+        
+        res.send(`
+            <html>
+                <head>
+                    <title>Email Verified - Democratic Social Network</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; }
+                        .success { color: #28a745; font-size: 24px; margin-bottom: 20px; }
+                        .message { color: #666; font-size: 16px; }
+                        .login-btn { background: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block; margin-top: 20px; }
+                    </style>
+                </head>
+                <body>
+                    <div class="success">✓ Email Verified Successfully!</div>
+                    <div class="message">Your email has been verified. You can now log in to your account.</div>
+                    <a href="/login" class="login-btn">Go to Login</a>
+                </body>
+            </html>
+        `);
+    } catch (error) {
+        console.error('Email verification error:', error);
+        res.status(400).send('Invalid or expired verification token');
+    }
+});
+
 // Fetch referenda list for UI and chat tabs
 app.get('/api/referenda', async (req, res) => {
     try {
@@ -288,9 +451,7 @@ app.get('/api/referenda', async (req, res) => {
             .select('id, username, email')
             .in('id', userIds);
         
-        // Decrypt user emails
-        const decryptedUsers = decryptUsersEmails(users || []);
-        const idToName = new Map(decryptedUsers.map(u => [u.id, u.username || u.email]));
+        const idToName = new Map((users || []).map(u => [u.id, u.username || u.email]));
 
         const refIdToYes = new Map();
         const refIdToNo = new Map();
@@ -422,9 +583,7 @@ app.get('/api/messages', async (req, res) => {
                         .select('id, username, email')
                         .in('id', userIds);
                     if (!usersErr && usersList) {
-                        // Decrypt user emails
-                        const decryptedUsers = decryptUsersEmails(usersList);
-                        decryptedUsers.forEach(u => { idToName[u.id] = u.username || u.email || 'User'; });
+                        usersList.forEach(u => { idToName[u.id] = u.username || u.email || 'User'; });
                     }
                 }
                 const enriched = (rows || []).map(r => ({ ...r, user: idToName[r.user_id] || 'Anonymous' }));
@@ -504,8 +663,7 @@ app.get('/api/elections/state', async (req, res) => {
             .select('id, username, email');
         if (usersErr) throw usersErr;
         
-        // Decrypt user emails
-        const decryptedUsers = decryptUsersEmails(users || []);
+        const decryptedUsers = users || [];
 
         const { data: votes, error: votesErr } = await supabase
             .from('admin_votes')
@@ -587,9 +745,7 @@ app.get('/api/suggestions', async (req, res) => {
             .select('id, username, email')
             .in('id', userIds);
         
-        // Decrypt user emails
-        const decryptedUsers = decryptUsersEmails(users || []);
-        const idToName = new Map(decryptedUsers.map(u => [u.id, u.username || u.email]));
+        const idToName = new Map((users || []).map(u => [u.id, u.username || u.email]));
 
         const sugIdToVoters = new Map();
         for (const v of voteRows) {
@@ -776,9 +932,7 @@ async function computeAdminLeaders() {
         const counts = new Map();
         (votes || []).forEach(v => counts.set(v.candidate_id, (counts.get(v.candidate_id) || 0) + 1));
         
-        // Decrypt user emails
-        const decryptedUsers = decryptUsersEmails(users || []);
-        const arr = decryptedUsers.map(u => ({ id: u.id, name: u.username || u.email, votes: counts.get(u.id) || 0 }));
+        const arr = (users || []).map(u => ({ id: u.id, name: u.username || u.email, votes: counts.get(u.id) || 0 }));
         arr.sort((a,b) => b.votes - a.votes);
         return arr.slice(0,2);
     } catch {
@@ -803,9 +957,7 @@ async function sendAdminChangeNotification(admins) {
         }
         notificationGuard.lastAdminNotify = { ids, ts: now };
         const { data: allUsers } = await supabase.from('users').select('email');
-        // Decrypt user emails for notifications
-        const decryptedUsers = decryptUsersEmails(allUsers || []);
-        const toList = decryptedUsers.map(u => u.email).join(',');
+        const toList = (allUsers || []).map(u => u.email).join(',');
         const subject = 'Admin Update - Democratic Social Network';
         const body = `
             <h2>Admin Update</h2>
@@ -841,8 +993,7 @@ app.get('/api/users', async (req, res) => {
         
         if (error) throw error;
         
-        // Decrypt user emails
-        const decryptedUsers = decryptUsersEmails(data || []);
+        const decryptedUsers = data || [];
         
         // In a real implementation, you would have a separate table for admin votes
         // For now, we'll simulate admin votes
@@ -1022,10 +1173,8 @@ async function sendLeadNotification(lead) {
         if (error) throw error;
         if (!users || users.length === 0) return;
 
-        // Decrypt user emails for notifications
-        const decryptedUsers = decryptUsersEmails(users || []);
         // Build or refresh round-robin queue: ensure each user gets one before repeats
-        const allEmails = decryptedUsers.map(u => u.email).filter(Boolean);
+        const allEmails = (users || []).map(u => u.email).filter(Boolean);
         // Initialize queue if empty or if unknown emails
         if (!notificationGuard.leadRRQueue.length) {
             // Randomize initial order
@@ -1066,9 +1215,16 @@ async function sendLeadNotification(lead) {
 }
 
 // Function to send email verification email
-async function sendVerificationEmail(email, token) {
+async function sendVerificationEmail(email, username) {
     try {
-        const verificationUrl = `${process.env.BASE_URL || 'http://localhost:3000'}/api/verify-email?token=${token}`;
+        // Generate a simple verification token (you could use JWT or random string)
+        const verificationToken = jwt.sign(
+            { email, username },
+            JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+        
+        const verificationUrl = `${process.env.BASE_URL || 'http://localhost:3000'}/api/verify-email?token=${verificationToken}`;
         
         const mailOptions = {
             from: process.env.EMAIL_USER || 'noreply@democratic-social-network.com',
@@ -1076,21 +1232,23 @@ async function sendVerificationEmail(email, token) {
             subject: 'Email Verification - Democratic Social Network',
             html: `
                 <h2>Email Verification</h2>
-                <p>Thank you for registering with Democratic Social Network.</p>
+                <p>Thank you for registering with Democratic Social Network, ${username}.</p>
                 <p>Please click the link below to verify your email address:</p>
                 <a href="${verificationUrl}">Verify Email</a>
                 <p>This link will expire in 24 hours.</p>
+                <p>If you didn't request this verification, please ignore this email.</p>
             `
         };
         
-        // In a real implementation, send the email
-        // For now, we'll just log it
-        console.log('Would send verification email:', mailOptions);
+        console.log('Sending verification email to:', email);
+        console.log('Verification URL:', verificationUrl);
         
-        // Uncomment the following line in a real implementation:
-        // await transporter.sendMail(mailOptions);
+        // Actually send the email
+        const info = await transporter.sendMail(mailOptions);
+        console.log('Verification email sent successfully:', info.response || info.messageId);
     } catch (error) {
         console.error('Error sending verification email:', error);
+        throw error;
     }
 }
 
@@ -1104,12 +1262,9 @@ async function sendReferendumApprovalNotification(suggestion) {
         
         if (error) throw error;
         
-        // Decrypt user emails for notifications
-        const decryptedUsers = decryptUsersEmails(users || []);
-        
         const mailOptions = {
             from: process.env.EMAIL_USER || 'noreply@democratic-social-network.com',
-            to: decryptedUsers.map(user => user.email).join(','),
+            to: (users || []).map(user => user.email).join(','),
             subject: 'New Referendum Approved - Democratic Social Network',
             html: `
                 <h2>New Referendum Approved</h2>
@@ -1136,12 +1291,9 @@ async function sendReferendumPassedNotification(referendum) {
         
         if (error) throw error;
         
-        // Decrypt user emails for notifications
-        const decryptedUsers = decryptUsersEmails(users || []);
-        
         const mailOptions = {
             from: process.env.EMAIL_USER || 'noreply@democratic-social-network.com',
-            to: decryptedUsers.map(user => user.email).join(','),
+            to: (users || []).map(user => user.email).join(','),
             subject: 'Referendum Approved - Democratic Social Network',
             html: `
                 <h2>Referendum Approved</h2>

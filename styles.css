@@ -513,13 +513,13 @@ button:hover {
 /* Chat Bar Styles */
 .chat-bar {
     position: fixed;
-    bottom: 12px;
+    bottom: 0;
     right: 12px;
     width: 420px;
     background: #ffffff;
     border: 1px solid #ddd;
-    border-radius: 8px;
-    box-shadow: 0 6px 18px rgba(0,0,0,0.15);
+    border-radius: 8px 8px 0 0;
+    box-shadow: 0 -6px 18px rgba(0,0,0,0.15);
     z-index: 1200;
 }
 
@@ -623,6 +623,7 @@ button:hover {
     .chat-bar {
         width: calc(100% - 20px);
         right: 10px;
+        bottom: 0;
     }
     
     main {
