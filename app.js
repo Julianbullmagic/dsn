@@ -399,6 +399,41 @@ function updateUIForAuthStatus(isLoggedIn) {
 }
 
 
+// Format milliseconds into a human-readable duration string
+function formatTenureDuration(ms) {
+    if (!ms || ms <= 0) return 'No tenure yet';
+    const totalDays = Math.floor(ms / (1000 * 60 * 60 * 24));
+    if (totalDays < 1) return 'Less than a day';
+    if (totalDays < 30) return `${totalDays} day${totalDays !== 1 ? 's' : ''}`;
+    const months = Math.floor(totalDays / 30);
+    const remainingDays = totalDays % 30;
+    if (months < 12) {
+        return remainingDays > 0
+            ? `${months} month${months !== 1 ? 's' : ''}, ${remainingDays} day${remainingDays !== 1 ? 's' : ''}`
+            : `${months} month${months !== 1 ? 's' : ''}`;
+    }
+    const years = Math.floor(months / 12);
+    const remainingMonths = months % 12;
+    return remainingMonths > 0
+        ? `${years} year${years !== 1 ? 's' : ''}, ${remainingMonths} month${remainingMonths !== 1 ? 's' : ''}`
+        : `${years} year${years !== 1 ? 's' : ''}`;
+}
+
+// Build a tenure progress bar HTML (4-year max)
+function tenureProgressBar(totalTenureMs) {
+    const maxMs = 4 * 365.25 * 24 * 60 * 60 * 1000; // 4 years
+    const pct = Math.min(100, (totalTenureMs / maxMs) * 100);
+    const isWarning = pct >= 75;
+    const barClass = isWarning ? 'tenure-bar-fill tenure-bar-warning' : 'tenure-bar-fill';
+    return `
+        <div class="tenure-bar-container" title="${formatTenureDuration(totalTenureMs)} of 4 years used">
+            <div class="tenure-bar">
+                <div class="${barClass}" style="width:${pct}%"></div>
+            </div>
+            <span class="tenure-bar-label">${Math.round(pct)}%</span>
+        </div>`;
+}
+
 // Load elections (admins and users) and render with vote buttons
 async function loadElections() {
     try {
@@ -408,24 +443,59 @@ async function loadElections() {
         const data = await res.json();
         const adminsContainer = document.querySelector('.current-admins');
         const usersContainer = document.querySelector('.users-container');
+        const rotationContainer = document.querySelector('.rotation-queue');
         if (!adminsContainer || !usersContainer) return;
 
-        adminsContainer.innerHTML = (data.admins || []).map(a => `
+        adminsContainer.innerHTML = (data.admins || []).map(a => {
+            const tenureHtml = a.isActiveLeader && a.activeSince
+                ? `<div class="tenure-active">Leading for ${formatTenureDuration(Date.now() - new Date(a.activeSince).getTime())}</div>`
+                : '';
+            const totalHtml = a.totalTenureMs > 0
+                ? `<div class="tenure-total">Total tenure: ${formatTenureDuration(a.totalTenureMs)} (${a.tenurePeriods} period${a.tenurePeriods !== 1 ? 's' : ''})</div>${tenureProgressBar(a.totalTenureMs)}`
+                : '';
+            return `
             <div class="admin-card">
                 <h4>${a.username || a.email}</h4>
                 <div>Votes: ${a.votes}</div>
+                ${tenureHtml}${totalHtml}
                 ${a.voters && a.voters.length ? `<div style="margin-top:6px"><small>Voters: ${a.voters.join(', ')}</small></div>` : ''}
-            </div>
-        `).join('') || '<p>No admins yet.</p>';
+            </div>`;
+        }).join('') || '<p>No admins yet.</p>';
 
-        usersContainer.innerHTML = (data.users || []).map(u => `
+        usersContainer.innerHTML = (data.users || []).map(u => {
+            const totalHtml = u.totalTenureMs > 0
+                ? `<div class="tenure-total">Total tenure: ${formatTenureDuration(u.totalTenureMs)} (${u.tenurePeriods} period${u.tenurePeriods !== 1 ? 's' : ''})</div>${tenureProgressBar(u.totalTenureMs)}`
+                : '';
+            return `
             <div class="user-card">
                 <div><strong>${u.username || u.email}</strong></div>
                 <div>Votes: ${u.votes}</div>
+                ${totalHtml}
                 ${u.voters && u.voters.length ? `<div style="margin:4px 0"><small>Voters: ${u.voters.join(', ')}</small></div>` : ''}
                 ${currentUser ? `<button class="vote-admin-btn" data-user-id="${u.id}">${data.myVoteCandidateId === u.id ? 'Remove Vote' : 'Vote'}</button>` : ''}
-            </div>
-        `).join('');
+            </div>`;
+        }).join('');
+
+        // Render rotation queue
+        if (rotationContainer) {
+            const queue = data.rotationQueue || [];
+            if (queue.length > 0) {
+                rotationContainer.innerHTML = `
+                    <h3>Rotation Queue</h3>
+                    <p class="rotation-hint">Users sorted by least tenure served — consider voting for those who haven't led yet!</p>
+                    <div class="rotation-list">
+                        ${queue.map((u, i) => `
+                            <div class="rotation-item ${i === 0 ? 'rotation-next' : ''}">
+                                <span class="rotation-rank">#${i + 1}</span>
+                                <span class="rotation-name">${u.username || u.email}</span>
+                                <span class="rotation-tenure">${formatTenureDuration(u.totalTenureMs)}</span>
+                            </div>
+                        `).join('')}
+                    </div>`;
+            } else {
+                rotationContainer.innerHTML = '<p>No rotation data available yet.</p>';
+            }
+        }
 
         document.querySelectorAll('.vote-admin-btn').forEach(btn => {
             btn.addEventListener('click', async (e) => {

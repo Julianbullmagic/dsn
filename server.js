@@ -693,9 +693,48 @@ app.get('/api/elections/state', async (req, res) => {
         }));
         usersWithCounts.sort((a, b) => b.votes - a.votes);
         const admins = usersWithCounts.slice(0, 2);
-        res.json({ admins, users: usersWithCounts, myVoteCandidateId });
+
+        // Enrich with tenure data
+        let tenureData = null;
+        try { tenureData = await getLeaderTenureData(); } catch (e) { /* graceful */ }
+
+        const tenureMap = new Map();
+        if (tenureData) {
+            for (const u of tenureData.users) {
+                tenureMap.set(u.id, u);
+            }
+        }
+
+        const enrichWithTenure = (list) => list.map(u => {
+            const t = tenureMap.get(u.id);
+            return {
+                ...u,
+                totalTenureMs: t ? t.totalTenureMs : 0,
+                isActiveLeader: t ? t.isActiveLeader : false,
+                activeSince: t ? t.activeSince : null,
+                tenurePeriods: t ? t.tenurePeriods : 0
+            };
+        });
+
+        res.json({
+            admins: enrichWithTenure(admins),
+            users: enrichWithTenure(usersWithCounts),
+            myVoteCandidateId,
+            rotationQueue: tenureData ? tenureData.rotationQueue : []
+        });
     } catch (error) {
         console.error('Elections state error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Get leader tenure data (rotation queue, tenure history)
+app.get('/api/leader-tenure', async (req, res) => {
+    try {
+        const data = await getLeaderTenureData();
+        res.json(data);
+    } catch (error) {
+        console.error('Leader tenure error:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -901,6 +940,7 @@ app.post('/api/elections/vote', authenticateToken, async (req, res) => {
             const afterLeaders = await computeAdminLeaders();
             if (!sameLeaders(beforeLeaders, afterLeaders)) {
                 await sendAdminChangeNotification(afterLeaders);
+                await syncLeaderTenure(beforeLeaders, afterLeaders);
             }
             return res.json({ message: 'Vote removed', removed: true });
         } else {
@@ -916,6 +956,7 @@ app.post('/api/elections/vote', authenticateToken, async (req, res) => {
         const afterLeaders = await computeAdminLeaders();
         if (!sameLeaders(beforeLeaders, afterLeaders)) {
             await sendAdminChangeNotification(afterLeaders);
+            await syncLeaderTenure(beforeLeaders, afterLeaders);
         }
         res.json({ message: 'Vote recorded', removed: false });
     } catch (error) {
@@ -924,17 +965,43 @@ app.post('/api/elections/vote', authenticateToken, async (req, res) => {
     }
 });
 
-// Helper: compute top 2 admins by votes
+// Maximum leader tenure: 4 years in milliseconds
+const MAX_TENURE_MS = 4 * 365.25 * 24 * 60 * 60 * 1000;
+
+// Helper: compute top 2 admins by votes (tenure-aware — excludes users who exceeded 4-year limit)
 async function computeAdminLeaders() {
     try {
         const { data: users } = await supabase.from('users').select('id, username, email');
         const { data: votes } = await supabase.from('admin_votes').select('candidate_id');
         const counts = new Map();
         (votes || []).forEach(v => counts.set(v.candidate_id, (counts.get(v.candidate_id) || 0) + 1));
-        
+
         const arr = (users || []).map(u => ({ id: u.id, name: u.username || u.email, votes: counts.get(u.id) || 0 }));
-        arr.sort((a,b) => b.votes - a.votes);
-        return arr.slice(0,2);
+
+        // Try to check tenure limits (gracefully degrade if table doesn't exist)
+        try {
+            const { data: tenures } = await supabase
+                .from('leader_tenure')
+                .select('user_id, started_at, ended_at');
+
+            const userTotalTenure = new Map();
+            const now = Date.now();
+            for (const t of (tenures || [])) {
+                const start = new Date(t.started_at).getTime();
+                const end = t.ended_at ? new Date(t.ended_at).getTime() : now;
+                userTotalTenure.set(t.user_id, (userTotalTenure.get(t.user_id) || 0) + Math.max(0, end - start));
+            }
+
+            // Filter out users who have exceeded the 4-year tenure limit
+            const eligible = arr.filter(u => (userTotalTenure.get(u.id) || 0) < MAX_TENURE_MS);
+            eligible.sort((a, b) => b.votes - a.votes);
+            return eligible.slice(0, 2);
+        } catch (tenureErr) {
+            // Tenure table might not exist yet, fall back to simple computation
+            console.warn('Tenure check skipped (table may not exist):', tenureErr?.message);
+            arr.sort((a, b) => b.votes - a.votes);
+            return arr.slice(0, 2);
+        }
     } catch {
         return [];
     }
@@ -944,6 +1011,188 @@ function sameLeaders(a, b) {
     const idsA = (a || []).map(x => x.id).join(',');
     const idsB = (b || []).map(x => x.id).join(',');
     return idsA === idsB;
+}
+
+// --- Leader Tenure Management ---
+
+// Sync leader tenures when leadership changes
+async function syncLeaderTenure(beforeLeaders, afterLeaders) {
+    try {
+        if (!supabase || supabase.__mock) return;
+
+        const beforeIds = new Set((beforeLeaders || []).map(l => l.id));
+        const afterIds = new Set((afterLeaders || []).map(l => l.id));
+
+        // Close tenures for leaders who were removed
+        for (const leader of beforeLeaders) {
+            if (!afterIds.has(leader.id)) {
+                await supabase
+                    .from('leader_tenure')
+                    .update({ ended_at: new Date().toISOString() })
+                    .eq('user_id', leader.id)
+                    .is('ended_at', null);
+                console.log(`Closed tenure for ${leader.name}`);
+            }
+        }
+
+        // Open tenures for new leaders
+        for (const leader of afterLeaders) {
+            if (!beforeIds.has(leader.id)) {
+                const { data: existing } = await supabase
+                    .from('leader_tenure')
+                    .select('id')
+                    .eq('user_id', leader.id)
+                    .is('ended_at', null)
+                    .limit(1);
+                if (!existing || existing.length === 0) {
+                    await supabase
+                        .from('leader_tenure')
+                        .insert([{ user_id: leader.id }]);
+                    console.log(`Opened tenure for ${leader.name}`);
+                }
+            }
+        }
+    } catch (e) {
+        console.warn('syncLeaderTenure error:', e?.message || e);
+    }
+}
+
+// Get total tenure duration for a user in milliseconds
+async function getTotalTenureMs(userId) {
+    try {
+        if (!supabase || supabase.__mock) return 0;
+        const { data: tenures, error } = await supabase
+            .from('leader_tenure')
+            .select('started_at, ended_at')
+            .eq('user_id', userId);
+        if (error) return 0;
+
+        let total = 0;
+        const now = Date.now();
+        for (const t of (tenures || [])) {
+            const start = new Date(t.started_at).getTime();
+            const end = t.ended_at ? new Date(t.ended_at).getTime() : now;
+            total += Math.max(0, end - start);
+        }
+        return total;
+    } catch (e) {
+        return 0;
+    }
+}
+
+// Get active tenure for a user
+async function getActiveTenure(userId) {
+    try {
+        if (!supabase || supabase.__mock) return null;
+        const { data, error } = await supabase
+            .from('leader_tenure')
+            .select('id, started_at')
+            .eq('user_id', userId)
+            .is('ended_at', null)
+            .single();
+        if (error) return null;
+        return data;
+    } catch (e) {
+        return null;
+    }
+}
+
+// Enforce maximum tenure: remove leaders who have exceeded 4 years
+async function enforceMaxTenure() {
+    try {
+        if (!supabase || supabase.__mock) return;
+
+        const { data: activeTenures } = await supabase
+            .from('leader_tenure')
+            .select('user_id, started_at')
+            .is('ended_at', null);
+
+        let changed = false;
+
+        for (const t of (activeTenures || [])) {
+            const totalMs = await getTotalTenureMs(t.user_id);
+            if (totalMs >= MAX_TENURE_MS) {
+                const { data: user } = await supabase.from('users').select('username').eq('id', t.user_id).single();
+                console.log(`Leader ${user?.username || t.user_id} has exceeded 4-year tenure limit. Removing votes.`);
+                await supabase.from('admin_votes').delete().eq('candidate_id', t.user_id);
+                await supabase
+                    .from('leader_tenure')
+                    .update({ ended_at: new Date().toISOString() })
+                    .eq('user_id', t.user_id)
+                    .is('ended_at', null);
+                changed = true;
+            }
+        }
+
+        if (changed) {
+            // Recompute leaders and open tenures for new leaders
+            const newLeaders = await computeAdminLeaders();
+            for (const leader of newLeaders) {
+                const active = await getActiveTenure(leader.id);
+                if (!active) {
+                    await supabase
+                        .from('leader_tenure')
+                        .insert([{ user_id: leader.id }]);
+                    console.log(`Opened tenure for ${leader.name} (rotation replacement)`);
+                }
+            }
+            io.emit('elections updated');
+            console.log('Tenure limit enforced: leaders adjusted');
+        }
+    } catch (e) {
+        console.warn('enforceMaxTenure error:', e?.message || e);
+    }
+}
+
+// Get leader tenure data for all users
+async function getLeaderTenureData() {
+    try {
+        if (!supabase || supabase.__mock) return { users: [], rotationQueue: [] };
+
+        const { data: users } = await supabase.from('users').select('id, username, email');
+        const { data: tenures, error } = await supabase
+            .from('leader_tenure')
+            .select('id, user_id, started_at, ended_at')
+            .order('started_at', { ascending: true });
+
+        if (error) return { users: [], rotationQueue: [] };
+
+        const now = Date.now();
+        const userTenures = new Map();
+
+        for (const t of (tenures || [])) {
+            if (!userTenures.has(t.user_id)) {
+                userTenures.set(t.user_id, { totalMs: 0, activeTenure: null, tenureCount: 0 });
+            }
+            const ut = userTenures.get(t.user_id);
+            const start = new Date(t.started_at).getTime();
+            const end = t.ended_at ? new Date(t.ended_at).getTime() : now;
+            ut.totalMs += Math.max(0, end - start);
+            ut.tenureCount++;
+            if (!t.ended_at) {
+                ut.activeTenure = { started_at: t.started_at, currentMs: now - start };
+            }
+        }
+
+        const allUsers = (users || []).map(u => ({
+            id: u.id,
+            username: u.username || u.email,
+            email: u.email,
+            totalTenureMs: userTenures.get(u.id)?.totalMs || 0,
+            activeTenure: userTenures.get(u.id)?.activeTenure || null,
+            tenureCount: userTenures.get(u.id)?.tenureCount || 0,
+            remainingMs: Math.max(0, MAX_TENURE_MS - (userTenures.get(u.id)?.totalMs || 0)),
+            isAtLimit: (userTenures.get(u.id)?.totalMs || 0) >= MAX_TENURE_MS
+        }));
+
+        // Sort by total tenure ascending (least tenure = highest rotation priority)
+        const rotationQueue = [...allUsers].sort((a, b) => a.totalTenureMs - b.totalTenureMs);
+
+        return { users: allUsers, rotationQueue };
+    } catch (e) {
+        console.warn('getLeaderTenureData error:', e?.message || e);
+        return { users: [], rotationQueue: [] };
+    }
 }
 
 // Email notification for admin change
@@ -1355,6 +1604,15 @@ setInterval(async () => {
     }
 }, 24 * 60 * 60 * 1000); // Run once per day
 
+// Enforce maximum leader tenure (every 6 hours)
+setInterval(async () => {
+    try {
+        await enforceMaxTenure();
+    } catch (error) {
+        console.error('Error during tenure enforcement:', error);
+    }
+}, 6 * 60 * 60 * 1000); // Run every 6 hours
+
 // Check for referendums that should be approved (every hour)
 setInterval(async () => {
     try {
@@ -1456,6 +1714,8 @@ setInterval(async () => {
             console.warn('[Supabase] Running with MOCK client (no real DB).');
         } else {
             console.log('[Supabase] Running with REAL client.');
+            // Enforce max tenure on startup
+            enforceMaxTenure().catch(e => console.warn('Startup tenure check failed:', e?.message || e));
         }
     } catch (e) {
         console.error('Failed to initialize Supabase:', e);

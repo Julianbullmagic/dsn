@@ -141,6 +141,22 @@ CREATE TABLE admin_votes (
 );
 ```
 
+### Leader Tenure Table
+
+Tracks discrete leadership periods for each user. Each time a user becomes a leader, a new row is opened with `started_at`. When they stop being a leader, `ended_at` is set. This allows calculating total tenure across multiple periods and enforcing the 4-year maximum.
+
+```sql
+CREATE TABLE leader_tenure (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) NOT NULL,
+  started_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  ended_at TIMESTAMP WITH TIME ZONE
+);
+
+-- Index for fast lookups of active tenures
+CREATE INDEX idx_leader_tenure_active ON leader_tenure (user_id) WHERE ended_at IS NULL;
+```
+
 Alternatively, you can use the provided `booking_leads_setup.sql` file which contains all the necessary commands.
 
 ## 5. Set Up Row Level Security (RLS)
@@ -162,6 +178,7 @@ ALTER TABLE referenda ENABLE ROW LEVEL SECURITY;
 ALTER TABLE votes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE booking_leads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE leader_tenure ENABLE ROW LEVEL SECURITY;
 
 -- Users can view all users
 CREATE POLICY "Users can view all users" ON users
@@ -194,6 +211,10 @@ FOR INSERT WITH CHECK (auth.uid() = user_id);
 -- Users can delete their own booking leads
 CREATE POLICY "Users can delete their own booking leads" ON booking_leads
 FOR DELETE USING (auth.uid() = user_id);
+
+-- Users can view all leader tenure records
+CREATE POLICY "Users can view all leader tenure" ON leader_tenure
+FOR SELECT USING (true);
 ```
 
 ## 6. Testing Your Setup
