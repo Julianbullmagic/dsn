@@ -770,6 +770,36 @@ button:hover {
     color: #1a5276;
 }
 
+/* Next-level democracy block */
+.next-level-democracy {
+    margin-top: 2rem;
+    padding: 1.75rem;
+    background-color: #eaf4fb;
+    border-radius: 6px;
+    border-top: 4px solid #3498db;
+}
+
+.next-level-democracy h3 {
+    color: #1a5276;
+    margin-bottom: 1rem;
+    font-size: 1.1rem;
+}
+
+.next-level-democracy p {
+    font-size: 1rem;
+    line-height: 1.7;
+    color: #333;
+    margin-bottom: 1rem;
+}
+
+.next-level-democracy p:last-child {
+    margin-bottom: 0;
+}
+
+.next-level-democracy strong {
+    color: #1a5276;
+}
+
 /* Counter-subversion block */
 .countersubversion-block {
     margin-top: 2rem;
