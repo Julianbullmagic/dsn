@@ -770,6 +770,32 @@ button:hover {
     color: #1a5276;
 }
 
+/* Nuance / diplomatic block */
+.nuance-block {
+    margin-top: 2rem;
+    padding: 1.75rem;
+    background-color: #f9f9f6;
+    border-radius: 6px;
+    border-left: 4px solid #95a5a6;
+}
+
+.nuance-block h3 {
+    color: #444;
+    margin-bottom: 1rem;
+    font-size: 1.1rem;
+}
+
+.nuance-block p {
+    font-size: 1rem;
+    line-height: 1.7;
+    color: #444;
+    margin-bottom: 1rem;
+}
+
+.nuance-block p:last-child {
+    margin-bottom: 0;
+}
+
 /* Next-level democracy block */
 .next-level-democracy {
     margin-top: 2rem;
