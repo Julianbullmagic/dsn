@@ -737,7 +737,7 @@ button:hover {
 
 /* Subversion summary box */
 .subversion-summary {
-    margin-top: 2rem;
+    margin-top: 0;
     padding: 1.5rem;
     background-color: #f0f4f8;
     border-left: 4px solid #2c3e50;
@@ -772,7 +772,7 @@ button:hover {
 
 /* Nuance / diplomatic block */
 .nuance-block {
-    margin-top: 2rem;
+    margin-top: 0;
     padding: 1.75rem;
     background-color: #f9f9f6;
     border-radius: 6px;
@@ -798,7 +798,7 @@ button:hover {
 
 /* Next-level democracy block */
 .next-level-democracy {
-    margin-top: 2rem;
+    margin-top: 0;
     padding: 1.75rem;
     background-color: #eaf4fb;
     border-radius: 6px;
@@ -828,7 +828,7 @@ button:hover {
 
 /* Counter-subversion block */
 .countersubversion-block {
-    margin-top: 2rem;
+    margin-top: 0;
     padding: 1.75rem;
     background-color: #1e2d3d;
     color: #dce8f0;
@@ -960,3 +960,271 @@ button:hover {
         padding-bottom: 80px;
     }
 }
+/* ── Restrictions & Moderation ── */
+.restrictions-intro { margin-bottom: 1rem; color: #555; }
+
+.restriction-card {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    border-left: 4px solid #aaa;
+}
+.restriction-card.status-pending  { border-left-color: #e67e22; }
+.restriction-card.status-active   { border-left-color: #e74c3c; }
+.restriction-card.status-rejected { border-left-color: #27ae60; }
+.restriction-card.status-expired  { border-left-color: #95a5a6; opacity: 0.7; }
+
+.restriction-header { display: flex; justify-content: space-between; margin-bottom: 0.5rem; }
+.restriction-type   { font-weight: bold; }
+.restriction-status { font-size: 0.85em; color: #666; }
+.restriction-body p { margin-bottom: 0.3rem; font-size: 0.95em; }
+
+.open-arbitration-btn {
+    margin-top: 0.5rem;
+    padding: 0.4rem 1rem;
+    background: #2c3e50;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9em;
+}
+.open-arbitration-btn:hover { background: #3d5166; }
+
+/* Moderation tab */
+.moderation-user-card {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 1rem;
+    margin-bottom: 0.75rem;
+}
+.propose-restriction-btn {
+    margin-top: 0.4rem;
+    padding: 0.35rem 0.9rem;
+    background: #c0392b;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9em;
+}
+.propose-restriction-btn:hover { background: #a93226; }
+.restriction-form { margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.5rem; }
+.restriction-form label { font-size: 0.9em; display: flex; flex-direction: column; gap: 0.25rem; }
+.restriction-form select, .restriction-form input, .restriction-form textarea {
+    padding: 0.4rem; border: 1px solid #ccc; border-radius: 4px; font-size: 0.95em;
+}
+.rsubmit-btn {
+    padding: 0.4rem 1rem; background: #27ae60; color: #fff;
+    border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em; width: fit-content;
+}
+.rsubmit-btn:hover { background: #219150; }
+.rcancel-btn {
+    padding: 0.4rem 0.8rem; background: #aaa; color: #fff;
+    border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em; width: fit-content;
+}
+
+/* Arbitration Modal */
+.modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.55);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1000;
+}
+.modal-box {
+    background: #fff;
+    border-radius: 8px;
+    width: 90%; max-width: 680px;
+    max-height: 85vh;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+}
+.modal-header {
+    background: #2c3e50; color: #fff;
+    padding: 0.85rem 1rem;
+    display: flex; justify-content: space-between; align-items: center;
+}
+.modal-header h3 { font-size: 1em; margin: 0; }
+.modal-close { background: none; border: none; color: #fff; font-size: 1.2rem; cursor: pointer; }
+.arbitration-summary { padding: 0.75rem 1rem; border-bottom: 1px solid #eee; font-size: 0.9em; }
+.arbitration-summary p { margin: 0.2rem 0; }
+.arbitration-members { padding: 0.5rem 1rem; font-size: 0.85em; color: #555; border-bottom: 1px solid #eee; }
+.arbitration-vote-section, .arbitration-respond-section {
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid #eee;
+    display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+    font-size: 0.9em;
+}
+.arb-vote-btn, .arb-respond-btn {
+    padding: 0.35rem 0.9rem; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em; color: #fff;
+}
+.approve-btn, .accept-btn { background: #e74c3c; }
+.approve-btn:hover, .accept-btn:hover { background: #c0392b; }
+.reject-btn, .decline-btn { background: #27ae60; }
+.reject-btn:hover, .decline-btn:hover { background: #219150; }
+.arbitration-chat { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+.arbitration-messages-list {
+    flex: 1; overflow-y: auto; padding: 0.75rem 1rem;
+    display: flex; flex-direction: column; gap: 0.4rem;
+    font-size: 0.9em;
+}
+.arb-msg { background: #f5f5f5; border-radius: 4px; padding: 0.4rem 0.6rem; }
+.arb-msg small { color: #999; margin-left: 0.5rem; }
+.arbitration-input-row {
+    display: flex; gap: 0.5rem; padding: 0.6rem;
+    border-top: 1px solid #eee;
+}
+.arbitration-input-row input {
+    flex: 1; padding: 0.4rem 0.6rem;
+    border: 1px solid #ccc; border-radius: 4px; font-size: 0.9em;
+}
+.arbitration-input-row button {
+    padding: 0.4rem 0.9rem; background: #2c3e50; color: #fff;
+    border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;
+}
+
+/* ── Welcome sections layout ── */
+.welcome-content-logged-in > div,
+.welcome-content-logged-in > .description {
+    margin-top: 0;
+    margin-bottom: 2.5rem;
+}
+.welcome-content-logged-in > div:last-child {
+    margin-bottom: 0;
+}
+
+/* Base section card shared by all welcome blocks */
+.description,
+.inequality-block,
+.political-exclusion-block,
+.ngo-block,
+.entrapment-block,
+.intelligence-admissions-block,
+.social-media-ban-block,
+.ground-rules-block {
+    padding: 1.75rem 2rem;
+    border-radius: 6px;
+    line-height: 1.7;
+}
+
+.description p,
+.inequality-block p,
+.political-exclusion-block p,
+.ngo-block p,
+.entrapment-block p,
+.intelligence-admissions-block p,
+.social-media-ban-block p,
+.ground-rules-block p {
+    margin-bottom: 1rem;
+    font-size: 1rem;
+    color: #333;
+}
+.description p:last-child,
+.inequality-block p:last-child,
+.political-exclusion-block p:last-child,
+.ngo-block p:last-child,
+.entrapment-block p:last-child,
+.intelligence-admissions-block p:last-child,
+.social-media-ban-block p:last-child {
+    margin-bottom: 0;
+}
+
+/* Section headings */
+.inequality-block h3,
+.political-exclusion-block h3,
+.ngo-block h3,
+.entrapment-block h3,
+.intelligence-admissions-block h3,
+.social-media-ban-block h3,
+.ground-rules-block h3 {
+    margin-bottom: 1rem;
+    font-size: 1.15rem;
+}
+
+/* Intro description — white with blue left strip */
+.description {
+    background: #fff;
+    border-left: 4px solid #3498db;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+
+/* Two-tier justice — red */
+.inequality-block {
+    background: #fff5f5;
+    border-left: 4px solid #c0392b;
+}
+.inequality-block h3 { color: #922b21; }
+
+/* Political exclusion — orange */
+.political-exclusion-block {
+    background: #fff9f2;
+    border-left: 4px solid #e67e22;
+}
+.political-exclusion-block h3 { color: #a04000; }
+
+/* NGO corruption — muted purple */
+.ngo-block {
+    background: #f9f5ff;
+    border-left: 4px solid #8e44ad;
+}
+.ngo-block h3 { color: #6c3483; }
+
+/* Manufactured threats — amber */
+.entrapment-block {
+    background: #fffbf0;
+    border-left: 4px solid #d4ac0d;
+}
+.entrapment-block h3 { color: #9a7d0a; }
+
+/* Intelligence admissions — dark slate */
+.intelligence-admissions-block {
+    background: #f2f4f6;
+    border-left: 4px solid #2c3e50;
+}
+.intelligence-admissions-block h3 { color: #1a252f; }
+
+/* Social media ban — medium blue */
+.social-media-ban-block {
+    background: #eaf4fb;
+    border-left: 4px solid #2980b9;
+}
+.social-media-ban-block h3 { color: #1a5276; }
+.social-media-ban-block em { color: #1a5276; }
+
+/* Ground rules — green */
+.ground-rules-block {
+    background: #f0faf4;
+    border-left: 4px solid #27ae60;
+}
+.ground-rules-block h3 { color: #1e8449; }
+.ground-rules-block h4 {
+    color: #1e8449;
+    margin: 1.5rem 0 0.75rem;
+    font-size: 1rem;
+}
+.ground-rules-list {
+    padding-left: 1.25rem;
+    margin: 0.75rem 0 1rem;
+}
+.ground-rules-list li {
+    margin-bottom: 0.75rem;
+    font-size: 0.97rem;
+    line-height: 1.65;
+    color: #333;
+}
+.ground-rules-list li strong { color: #1e8449; }
+.arbitration-steps {
+    padding-left: 1.4rem;
+    margin: 0.75rem 0 1rem;
+}
+.arbitration-steps li {
+    margin-bottom: 0.65rem;
+    font-size: 0.97rem;
+    line-height: 1.65;
+    color: #333;
+}
+.arbitration-steps li strong { color: #1e8449; }

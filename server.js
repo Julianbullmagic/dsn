@@ -94,6 +94,11 @@ io.on('connection', (socket) => {
             } catch (e) {
                 console.warn('JWT verify failed for chat message:', e?.message || e);
             }
+            if (userId) {
+                const chatBan = await getActiveRestriction(userId, 'chat').catch(() => null);
+                if (chatBan) return;
+            }
+
             const toInsert = { room, user_id: userId, content: msg?.content || '' };
 
             let saved = null;
@@ -484,6 +489,8 @@ app.post('/api/referenda/:id/vote', authenticateToken, async (req, res) => {
     try {
         const referendumId = req.params.id;
         const voterId = req.user.id;
+        const referendaBan = await getActiveRestriction(voterId, 'referenda').catch(() => null);
+        if (referendaBan) return res.status(403).json({ error: 'You are currently restricted from voting on referenda.' });
         const voteType = (req.body && req.body.voteType) === 'no' ? 'no' : 'yes';
 
         const { data: existing, error: eErr } = await supabase
@@ -716,11 +723,14 @@ app.get('/api/elections/state', async (req, res) => {
             };
         });
 
+        const isViewerAdmin = viewerId ? admins.some(a => a.id === viewerId) : false;
+
         res.json({
             admins: enrichWithTenure(admins),
             users: enrichWithTenure(usersWithCounts),
             myVoteCandidateId,
-            rotationQueue: tenureData ? tenureData.rotationQueue : []
+            rotationQueue: tenureData ? tenureData.rotationQueue : [],
+            isAdmin: isViewerAdmin
         });
     } catch (error) {
         console.error('Elections state error:', error);
@@ -745,6 +755,8 @@ app.post('/api/suggestions', authenticateToken, async (req, res) => {
     try {
         const { title, description } = req.body;
         if (!title || !description) return res.status(400).json({ error: 'title and description required' });
+        const newsfeedBan = await getActiveRestriction(req.user.id, 'newsfeed').catch(() => null);
+        if (newsfeedBan) return res.status(403).json({ error: 'You are currently restricted from posting.' });
         const { data, error } = await supabase
             .from('suggestions')
             .insert([{ user_id: req.user.id, title, description }])
@@ -915,6 +927,9 @@ app.post('/api/elections/vote', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'candidateId is required' });
         }
         const voterId = req.user.id;
+
+        const electionsBan = await getActiveRestriction(voterId, 'elections').catch(() => null);
+        if (electionsBan) return res.status(403).json({ error: 'You are currently restricted from voting in elections.' });
 
         // Prevent self-vote early to avoid DB constraint errors
         if (candidateId === voterId) {
@@ -1559,6 +1574,285 @@ async function sendReferendumPassedNotification(referendum) {
         console.error('Error sending referendum passed notification:', error);
     }
 }
+
+// ─────────────────────────────────────────────────────────
+// RESTRICTION & ARBITRATION SYSTEM
+// ─────────────────────────────────────────────────────────
+
+async function isCurrentAdmin(userId) {
+    const leaders = await computeAdminLeaders();
+    return leaders.some(l => l.id === userId);
+}
+
+async function getActiveRestriction(userId, type) {
+    if (!supabase || supabase.__mock) return null;
+    const { data } = await supabase
+        .from('restrictions')
+        .select('*')
+        .eq('accused_id', userId)
+        .eq('status', 'active')
+        .in('restriction_type', [type, 'complete'])
+        .order('created_at', { ascending: false })
+        .limit(1);
+    if (!data || !data.length) return null;
+    const r = data[0];
+    if (r.expires_at && new Date(r.expires_at) < new Date()) {
+        await supabase.from('restrictions').update({ status: 'expired' }).eq('id', r.id);
+        return null;
+    }
+    return r;
+}
+
+async function postSystemNotification(content) {
+    try {
+        const msg = { room: 'general', user_id: null, content: `[System] ${content}`, created_at: new Date().toISOString() };
+        if (supabase && !supabase.__mock) await supabase.from('messages').insert([msg]);
+        io.to('general').emit('chat message', { ...msg, user: 'System', id: `sys-${Date.now()}` });
+    } catch (e) {
+        console.warn('postSystemNotification failed:', e?.message);
+    }
+}
+
+async function getPanelMemberIds(panelId) {
+    if (!supabase || supabase.__mock) return [];
+    const { data } = await supabase.from('arbitration_members').select('user_id').eq('panel_id', panelId);
+    return (data || []).map(m => m.user_id);
+}
+
+async function fillSeat(panelId, seat, role, excludeIds) {
+    if (!supabase || supabase.__mock) return null;
+    let eligible = [];
+    if (role === 'admin') {
+        const leaders = await computeAdminLeaders();
+        eligible = leaders.filter(l => !excludeIds.includes(l.id));
+    } else {
+        const { data: allUsers } = await supabase.from('users').select('id, username');
+        const leaders = await computeAdminLeaders();
+        const leaderIds = leaders.map(l => l.id);
+        eligible = (allUsers || []).filter(u => !excludeIds.includes(u.id) && !leaderIds.includes(u.id));
+    }
+    if (!eligible.length) return null;
+    const chosen = eligible[Math.floor(Math.random() * eligible.length)];
+    const { data } = await supabase.from('arbitration_members')
+        .insert([{ panel_id: panelId, user_id: chosen.id, role, seat, status: 'pending' }])
+        .select().single();
+    return data;
+}
+
+// Propose a restriction (admin only)
+app.post('/api/restrictions', authenticateToken, async (req, res) => {
+    try {
+        if (!supabase || supabase.__mock) return res.status(503).json({ error: 'DB unavailable' });
+        const { accusedId, restrictionType, reason, durationHours } = req.body;
+        const accuserId = req.user.id;
+        const validTypes = ['chat', 'newsfeed', 'referenda', 'elections', 'complete'];
+        if (!validTypes.includes(restrictionType)) return res.status(400).json({ error: 'Invalid restriction type' });
+        if (!reason || !reason.trim()) return res.status(400).json({ error: 'Reason is required' });
+        if (!accusedId) return res.status(400).json({ error: 'accusedId is required' });
+        if (accusedId === accuserId) return res.status(400).json({ error: 'Cannot restrict yourself' });
+        if (!await isCurrentAdmin(accuserId)) return res.status(403).json({ error: 'Only admins can propose restrictions' });
+
+        const { data: restriction, error: rErr } = await supabase
+            .from('restrictions')
+            .insert([{ accused_id: accusedId, accuser_id: accuserId, restriction_type: restrictionType, reason: reason.trim(), duration_hours: durationHours || null, status: 'pending' }])
+            .select().single();
+        if (rErr) throw rErr;
+
+        const { data: panel, error: pErr } = await supabase
+            .from('arbitration_panels')
+            .insert([{ restriction_id: restriction.id, status: 'assembling' }])
+            .select().single();
+        if (pErr) throw pErr;
+
+        const exclude = [accusedId, accuserId];
+        await fillSeat(panel.id, 1, 'admin', exclude);
+        const after1 = await getPanelMemberIds(panel.id);
+        await fillSeat(panel.id, 2, 'member', [...exclude, ...after1]);
+        const after2 = await getPanelMemberIds(panel.id);
+        await fillSeat(panel.id, 3, 'member', [...exclude, ...after2]);
+
+        const { data: accused } = await supabase.from('users').select('username').eq('id', accusedId).single();
+        const { data: accuser } = await supabase.from('users').select('username').eq('id', accuserId).single();
+
+        await postSystemNotification(
+            `A restriction has been proposed against ${accused?.username || 'a user'} by admin ${accuser?.username || 'admin'}. ` +
+            `Type: ${restrictionType}. An arbitration panel is being assembled.`
+        );
+
+        io.emit('restrictions updated');
+        res.json({ restriction, panelId: panel.id });
+    } catch (e) {
+        console.error('POST /api/restrictions error:', e);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Get all restrictions (public)
+app.get('/api/restrictions', async (req, res) => {
+    try {
+        if (!supabase || supabase.__mock) return res.json([]);
+        const { data, error } = await supabase
+            .from('restrictions')
+            .select('*, accused:accused_id(id, username), accuser:accuser_id(id, username)')
+            .order('created_at', { ascending: false });
+        if (error) throw error;
+        const now = new Date();
+        for (const r of (data || [])) {
+            if (r.status === 'active' && r.expires_at && new Date(r.expires_at) < now) {
+                await supabase.from('restrictions').update({ status: 'expired' }).eq('id', r.id);
+                r.status = 'expired';
+            }
+        }
+        res.json(data || []);
+    } catch (e) {
+        console.error('GET /api/restrictions error:', e);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Get arbitration panel (accused, accuser, and panel members only)
+app.get('/api/arbitration/:panelId', authenticateToken, async (req, res) => {
+    try {
+        if (!supabase || supabase.__mock) return res.status(503).json({ error: 'DB unavailable' });
+        const { panelId } = req.params;
+        const userId = req.user.id;
+        const { data: panel, error: pErr } = await supabase
+            .from('arbitration_panels')
+            .select('*, restriction:restriction_id(*)')
+            .eq('id', panelId).single();
+        if (pErr || !panel) return res.status(404).json({ error: 'Panel not found' });
+        const restriction = panel.restriction;
+        const { data: members } = await supabase
+            .from('arbitration_members')
+            .select('*, user:user_id(id, username)')
+            .eq('panel_id', panelId);
+        const memberIds = (members || []).map(m => m.user_id);
+        if (![restriction.accused_id, restriction.accuser_id, ...memberIds].includes(userId))
+            return res.status(403).json({ error: 'Not authorised to view this panel' });
+        const { data: messages } = await supabase
+            .from('arbitration_messages').select('*').eq('panel_id', panelId).order('created_at', { ascending: true });
+        res.json({ panel, restriction, members: members || [], messages: messages || [] });
+    } catch (e) {
+        console.error('GET /api/arbitration/:panelId error:', e);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Send a message in the arbitration panel chat
+app.post('/api/arbitration/:panelId/messages', authenticateToken, async (req, res) => {
+    try {
+        if (!supabase || supabase.__mock) return res.status(503).json({ error: 'DB unavailable' });
+        const { panelId } = req.params;
+        const userId = req.user.id;
+        const { content } = req.body;
+        if (!content || !content.trim()) return res.status(400).json({ error: 'Message content required' });
+        const { data: panel } = await supabase
+            .from('arbitration_panels').select('*, restriction:restriction_id(*)').eq('id', panelId).single();
+        if (!panel) return res.status(404).json({ error: 'Panel not found' });
+        const { data: members } = await supabase.from('arbitration_members').select('user_id').eq('panel_id', panelId);
+        const memberIds = (members || []).map(m => m.user_id);
+        if (![panel.restriction.accused_id, panel.restriction.accuser_id, ...memberIds].includes(userId))
+            return res.status(403).json({ error: 'Not authorised' });
+        const { data: userRow } = await supabase.from('users').select('username').eq('id', userId).single();
+        const { data: msg, error } = await supabase
+            .from('arbitration_messages')
+            .insert([{ panel_id: panelId, user_id: userId, username: userRow?.username || 'User', content: content.trim() }])
+            .select().single();
+        if (error) throw error;
+        io.emit('arbitration message', { panelId, msg });
+        res.json(msg);
+    } catch (e) {
+        console.error('POST /api/arbitration/:panelId/messages error:', e);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Accept or decline arbitrator invitation
+app.post('/api/arbitration/:panelId/respond', authenticateToken, async (req, res) => {
+    try {
+        if (!supabase || supabase.__mock) return res.status(503).json({ error: 'DB unavailable' });
+        const { panelId } = req.params;
+        const userId = req.user.id;
+        const accept = req.body.accept === true || req.body.accept === 'true';
+        const { data: member } = await supabase
+            .from('arbitration_members').select('*')
+            .eq('panel_id', panelId).eq('user_id', userId).eq('status', 'pending').single();
+        if (!member) return res.status(404).json({ error: 'No pending invitation found' });
+        await supabase.from('arbitration_members').update({ status: accept ? 'accepted' : 'declined' }).eq('id', member.id);
+        if (!accept) {
+            const { data: panel } = await supabase
+                .from('arbitration_panels').select('*, restriction:restriction_id(*)').eq('id', panelId).single();
+            const exclude = [panel.restriction.accused_id, panel.restriction.accuser_id, ...await getPanelMemberIds(panelId)];
+            await fillSeat(panelId, member.seat, member.role, exclude);
+        } else {
+            const { data: allMembers } = await supabase.from('arbitration_members').select('*').eq('panel_id', panelId);
+            const accepted = (allMembers || []).filter(m => m.status === 'accepted' || (m.id === member.id));
+            if (accepted.length >= 3) {
+                await supabase.from('arbitration_panels').update({ status: 'active' }).eq('id', panelId);
+                await postSystemNotification('Arbitration panel fully assembled. Judges may now review and vote.');
+            }
+        }
+        io.emit('restrictions updated');
+        res.json({ ok: true });
+    } catch (e) {
+        console.error('POST /api/arbitration/:panelId/respond error:', e);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Cast a vote on a proposed restriction
+app.post('/api/arbitration/:panelId/vote', authenticateToken, async (req, res) => {
+    try {
+        if (!supabase || supabase.__mock) return res.status(503).json({ error: 'DB unavailable' });
+        const { panelId } = req.params;
+        const userId = req.user.id;
+        const { vote } = req.body;
+        if (!['approve', 'reject'].includes(vote)) return res.status(400).json({ error: 'Vote must be approve or reject' });
+        const { data: member } = await supabase
+            .from('arbitration_members').select('*')
+            .eq('panel_id', panelId).eq('user_id', userId).eq('status', 'accepted').single();
+        if (!member) return res.status(403).json({ error: 'Not an accepted panel member' });
+        if (member.vote) return res.status(400).json({ error: 'Already voted' });
+        await supabase.from('arbitration_members')
+            .update({ vote, voted_at: new Date().toISOString() }).eq('id', member.id);
+        const { data: allMembers } = await supabase.from('arbitration_members')
+            .select('*').eq('panel_id', panelId).eq('status', 'accepted');
+        const counts = { approve: 0, reject: 0 };
+        for (const m of (allMembers || [])) {
+            const v = m.id === member.id ? vote : m.vote;
+            if (v) counts[v]++;
+        }
+        const majority = Math.floor((allMembers || []).length / 2) + 1;
+        let decided = false;
+        if (counts.approve >= majority || counts.reject >= majority) {
+            decided = true;
+            const outcome = counts.approve >= majority ? 'approve' : 'reject';
+            await supabase.from('arbitration_panels').update({ status: 'decided' }).eq('id', panelId);
+            const { data: panel } = await supabase.from('arbitration_panels').select('restriction_id').eq('id', panelId).single();
+            const { data: restriction } = await supabase.from('restrictions')
+                .select('*, accused:accused_id(username)').eq('id', panel.restriction_id).single();
+            if (outcome === 'approve') {
+                const expiresAt = restriction.duration_hours
+                    ? new Date(Date.now() + restriction.duration_hours * 3600000).toISOString() : null;
+                await supabase.from('restrictions').update({ status: 'active', activated_at: new Date().toISOString(), expires_at: expiresAt }).eq('id', panel.restriction_id);
+                const dur = restriction.duration_hours ? `for ${restriction.duration_hours}h` : 'permanently';
+                await postSystemNotification(
+                    `Restriction APPROVED: ${restriction.accused?.username || 'User'} is now restricted (${restriction.restriction_type}) ${dur}.`
+                );
+            } else {
+                await supabase.from('restrictions').update({ status: 'rejected' }).eq('id', panel.restriction_id);
+                await postSystemNotification(
+                    `Restriction REJECTED: No action taken against ${restriction.accused?.username || 'the user'}.`
+                );
+            }
+        }
+        io.emit('restrictions updated');
+        res.json({ ok: true, decided, counts });
+    } catch (e) {
+        console.error('POST /api/arbitration/:panelId/vote error:', e);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
 
 // Add periodic cleanup task for old referendums (more than 2 weeks old)
 setInterval(async () => {

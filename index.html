@@ -16,6 +16,8 @@
                     <li class="tab" data-tab="suggestions">Suggestions</li>
                     <li class="tab" data-tab="referenda">Referenda</li>
                     <li class="tab" data-tab="elections">Elections</li>
+                    <li class="tab" data-tab="restrictions">Restrictions</li>
+                    <li class="tab admin-only-tab" data-tab="moderation" style="display:none">Moderation</li>
                     <li><a class="nav-link" href="/login" id="login-link">Login</a></li>
                     <li><a class="nav-link" href="/register" id="register-link">Register</a></li>
                 </ul>
@@ -160,7 +162,54 @@
             </div>
         </section>
 
-        
+        <!-- Restrictions Tab -->
+        <section id="restrictions" class="tab-content">
+            <h2>Restrictions</h2>
+            <p class="restrictions-intro">All proposed and active restrictions are listed here. Every member can see the reason and outcome for each case.</p>
+            <div class="restrictions-container">
+                <!-- Populated by loadRestrictions() -->
+            </div>
+        </section>
+
+        <!-- Moderation Tab (admin only) -->
+        <section id="moderation" class="tab-content">
+            <h2>Moderation</h2>
+            <p>Select a member to propose a restriction. A three-person arbitration panel (one admin + two members, randomly selected) will be assembled to review the proposal before any restriction takes effect.</p>
+            <div class="moderation-users-container">
+                <!-- Populated by loadModeration() -->
+            </div>
+        </section>
+
+        <!-- Arbitration Panel Modal -->
+        <div id="arbitration-modal" class="modal-overlay" style="display:none">
+            <div class="modal-box">
+                <div class="modal-header">
+                    <h3 id="arbitration-modal-title">Arbitration Panel</h3>
+                    <button class="modal-close" id="arbitration-modal-close">✕</button>
+                </div>
+                <div id="arbitration-restriction-summary" class="arbitration-summary"></div>
+                <div id="arbitration-panel-members" class="arbitration-members"></div>
+                <div id="arbitration-vote-section" class="arbitration-vote-section" style="display:none">
+                    <strong>Your vote:</strong>
+                    <button class="arb-vote-btn approve-btn" data-vote="approve">Approve restriction</button>
+                    <button class="arb-vote-btn reject-btn" data-vote="reject">Reject restriction</button>
+                </div>
+                <div id="arbitration-respond-section" class="arbitration-respond-section" style="display:none">
+                    <strong>You have been invited to serve as a judge on this panel.</strong>
+                    <button class="arb-respond-btn accept-btn" data-accept="true">Accept</button>
+                    <button class="arb-respond-btn decline-btn" data-accept="false">Decline</button>
+                </div>
+                <div class="arbitration-chat">
+                    <div id="arbitration-messages" class="arbitration-messages-list"></div>
+                    <div class="arbitration-input-row">
+                        <input type="text" id="arbitration-msg-input" placeholder="Type a message…">
+                        <button id="arbitration-msg-send">Send</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
 
     </main>
 

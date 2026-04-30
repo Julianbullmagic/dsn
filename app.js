@@ -1,9 +1,9 @@
 // Current active chat room
 let currentRoom = 'general';
 let currentUser = null; // In a real app, this would be set after login
-let isAdmin = true; // For demo purposes, set to true to show admin controls
+let isAdmin = false;
 let authToken = null;
-// In a real implementation, this would be determined by checking if user is in top 3 admins
+let currentArbitrationPanelId = null;
 
 // Tab switching functionality
 document.addEventListener('DOMContentLoaded', function() {
@@ -45,6 +45,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 loadSuggestions();
             } else if (tabId === 'referenda') {
                 loadReferendaList();
+            } else if (tabId === 'restrictions') {
+                loadRestrictions();
+            } else if (tabId === 'moderation') {
+                loadModeration();
             }
         });
     });
@@ -441,6 +445,13 @@ async function loadElections() {
             headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
         });
         const data = await res.json();
+
+        // Update admin status and show/hide Moderation tab
+        isAdmin = !!data.isAdmin;
+        document.querySelectorAll('.admin-only-tab').forEach(t => {
+            t.style.display = isAdmin ? 'block' : 'none';
+        });
+
         const adminsContainer = document.querySelector('.current-admins');
         const usersContainer = document.querySelector('.users-container');
         const rotationContainer = document.querySelector('.rotation-queue');
@@ -762,3 +773,327 @@ async function loadSuggestions() {
         console.error('Error loading suggestions:', error);
     }
 }
+
+// ─────────────────────────────────────────────
+// RESTRICTIONS TAB
+// ─────────────────────────────────────────────
+
+const RESTRICTION_LABELS = {
+    chat: 'Chat ban',
+    newsfeed: 'News feed ban',
+    referenda: 'Referenda ban',
+    elections: 'Elections ban',
+    complete: 'Complete ban'
+};
+
+const STATUS_LABELS = {
+    pending: 'Pending arbitration',
+    active: 'Active',
+    rejected: 'Rejected',
+    expired: 'Expired'
+};
+
+async function loadRestrictions() {
+    const container = document.querySelector('.restrictions-container');
+    if (!container) return;
+    try {
+        const res = await fetch('/api/restrictions');
+        const list = await res.json();
+        if (!list.length) {
+            container.innerHTML = '<p>No restrictions on record.</p>';
+            return;
+        }
+        container.innerHTML = list.map(r => {
+            const accused = r.accused?.username || 'Unknown';
+            const accuser = r.accuser?.username || 'Admin';
+            const type = RESTRICTION_LABELS[r.restriction_type] || r.restriction_type;
+            const status = STATUS_LABELS[r.status] || r.status;
+            const dur = r.duration_hours ? `${r.duration_hours} hour${r.duration_hours !== 1 ? 's' : ''}` : 'Permanent';
+            const expires = r.expires_at ? `Expires: ${new Date(r.expires_at).toLocaleString()}` : '';
+            const isInvolved = currentUser && (
+                r.accused?.id === currentUser.id ||
+                r.accuser?.id === currentUser.id
+            );
+            return `
+            <div class="restriction-card status-${r.status}">
+                <div class="restriction-header">
+                    <span class="restriction-type">${type}</span>
+                    <span class="restriction-status">${status}</span>
+                </div>
+                <div class="restriction-body">
+                    <p><strong>Against:</strong> ${accused} &nbsp;|&nbsp; <strong>Proposed by:</strong> ${accuser}</p>
+                    <p><strong>Reason:</strong> ${r.reason}</p>
+                    <p><strong>Duration:</strong> ${dur} ${expires}</p>
+                    <p><small>Proposed: ${new Date(r.created_at).toLocaleString()}</small></p>
+                </div>
+                ${r.panel_id || r.status === 'pending' ? `<button class="open-arbitration-btn" data-restriction-id="${r.id}">Open Arbitration Panel</button>` : ''}
+            </div>`;
+        }).join('');
+
+        container.querySelectorAll('.open-arbitration-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const restrictionId = btn.getAttribute('data-restriction-id');
+                await openArbitrationModal(restrictionId);
+            });
+        });
+    } catch (e) {
+        console.error('loadRestrictions error:', e);
+        container.innerHTML = '<p>Failed to load restrictions.</p>';
+    }
+}
+
+// ─────────────────────────────────────────────
+// MODERATION TAB (admin only)
+// ─────────────────────────────────────────────
+
+async function loadModeration() {
+    const container = document.querySelector('.moderation-users-container');
+    if (!container) return;
+    if (!isAdmin) { container.innerHTML = '<p>Admin access required.</p>'; return; }
+    try {
+        const res = await fetch('/api/elections/state', { headers: { 'Authorization': `Bearer ${authToken}` } });
+        const data = await res.json();
+        const users = (data.users || []).filter(u => u.id !== currentUser?.id);
+        container.innerHTML = users.map(u => `
+            <div class="moderation-user-card" id="mod-card-${u.id}">
+                <strong>${u.username || u.email}</strong>
+                <button class="propose-restriction-btn" data-user-id="${u.id}" data-username="${u.username || u.email}">
+                    Propose Restriction
+                </button>
+                <div class="restriction-form" id="rform-${u.id}" style="display:none">
+                    <label>Type:
+                        <select class="rtype-select">
+                            <option value="chat">Chat ban</option>
+                            <option value="newsfeed">News feed ban</option>
+                            <option value="referenda">Referenda ban</option>
+                            <option value="elections">Elections ban</option>
+                            <option value="complete">Complete ban</option>
+                        </select>
+                    </label>
+                    <label>Duration (hours, leave blank for permanent):
+                        <input type="number" class="rduration-input" min="1" placeholder="e.g. 24">
+                    </label>
+                    <label>Reason (required):
+                        <textarea class="rreason-input" rows="3" placeholder="Describe the rule violation…"></textarea>
+                    </label>
+                    <button class="rsubmit-btn" data-user-id="${u.id}">Submit for Arbitration</button>
+                    <button class="rcancel-btn" data-user-id="${u.id}">Cancel</button>
+                </div>
+            </div>`).join('') || '<p>No other users found.</p>';
+
+        container.querySelectorAll('.propose-restriction-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const uid = btn.getAttribute('data-user-id');
+                document.getElementById(`rform-${uid}`).style.display = 'block';
+                btn.style.display = 'none';
+            });
+        });
+
+        container.querySelectorAll('.rcancel-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const uid = btn.getAttribute('data-user-id');
+                document.getElementById(`rform-${uid}`).style.display = 'none';
+                document.querySelector(`[data-user-id="${uid}"].propose-restriction-btn`).style.display = 'inline-block';
+            });
+        });
+
+        container.querySelectorAll('.rsubmit-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const uid = btn.getAttribute('data-user-id');
+                const card = document.getElementById(`mod-card-${uid}`);
+                const restrictionType = card.querySelector('.rtype-select').value;
+                const durationHours = parseInt(card.querySelector('.rduration-input').value) || null;
+                const reason = card.querySelector('.rreason-input').value.trim();
+                if (!reason) { alert('Reason is required.'); return; }
+                btn.disabled = true;
+                try {
+                    const resp = await fetch('/api/restrictions', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+                        body: JSON.stringify({ accusedId: uid, restrictionType, reason, durationHours })
+                    });
+                    const result = await resp.json();
+                    if (!resp.ok) { alert(result.error || 'Failed to submit'); btn.disabled = false; return; }
+                    alert('Restriction proposed. An arbitration panel is being assembled.');
+                    document.getElementById(`rform-${uid}`).style.display = 'none';
+                    document.querySelector(`[data-user-id="${uid}"].propose-restriction-btn`).style.display = 'inline-block';
+                    btn.disabled = false;
+                    await openArbitrationModal(result.restriction.id, result.panelId);
+                } catch (e) {
+                    alert('Failed to submit restriction.');
+                    btn.disabled = false;
+                }
+            });
+        });
+    } catch (e) {
+        console.error('loadModeration error:', e);
+        container.innerHTML = '<p>Failed to load users.</p>';
+    }
+}
+
+// ─────────────────────────────────────────────
+// ARBITRATION MODAL
+// ─────────────────────────────────────────────
+
+async function openArbitrationModal(restrictionId, knownPanelId) {
+    const modal = document.getElementById('arbitration-modal');
+    if (!modal) return;
+
+    // First find the panel id if not given
+    let panelId = knownPanelId;
+    if (!panelId) {
+        const rRes = await fetch('/api/restrictions').catch(() => null);
+        if (rRes && rRes.ok) {
+            const list = await rRes.json();
+            const r = list.find(x => x.id === restrictionId);
+            if (r) panelId = r.panel_id;
+        }
+    }
+    if (!panelId) {
+        // Try fetching restrictions list to get panel id via a fresh call
+        try {
+            const rRes = await fetch('/api/restrictions');
+            const list = await rRes.json();
+            // The restrictions endpoint doesn't return panel_id directly — we need to query the panel
+            // Fall back: just open with the restriction summary only
+        } catch (e) {}
+    }
+
+    currentArbitrationPanelId = panelId;
+    modal.style.display = 'flex';
+
+    if (!panelId) {
+        document.getElementById('arbitration-modal-title').textContent = 'Arbitration Panel';
+        document.getElementById('arbitration-restriction-summary').textContent = 'Panel is being assembled. Check back shortly.';
+        document.getElementById('arbitration-panel-members').innerHTML = '';
+        document.getElementById('arbitration-vote-section').style.display = 'none';
+        document.getElementById('arbitration-respond-section').style.display = 'none';
+        document.getElementById('arbitration-messages').innerHTML = '';
+        return;
+    }
+
+    await refreshArbitrationModal(panelId);
+}
+
+async function refreshArbitrationModal(panelId) {
+    try {
+        const res = await fetch(`/api/arbitration/${panelId}`, {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (!res.ok) {
+            document.getElementById('arbitration-restriction-summary').textContent = 'You are not authorised to view this panel.';
+            return;
+        }
+        const { restriction, members, messages } = await res.json();
+
+        document.getElementById('arbitration-modal-title').textContent =
+            `Arbitration: ${RESTRICTION_LABELS[restriction.restriction_type] || restriction.restriction_type} proposed against ${restriction.accused_username || ''}`;
+
+        const dur = restriction.duration_hours ? `${restriction.duration_hours}h` : 'permanent';
+        document.getElementById('arbitration-restriction-summary').innerHTML =
+            `<p><strong>Reason:</strong> ${restriction.reason}</p>` +
+            `<p><strong>Duration:</strong> ${dur} &nbsp;|&nbsp; <strong>Status:</strong> ${STATUS_LABELS[restriction.status] || restriction.status}</p>`;
+
+        document.getElementById('arbitration-panel-members').innerHTML =
+            `<p><strong>Panel:</strong> ` +
+            (members.map(m => {
+                const name = m.user?.username || 'User';
+                const statusStr = m.status === 'accepted' ? (m.vote ? `voted: ${m.vote}` : 'accepted') : m.status;
+                return `${name} (${m.role}, ${statusStr})`;
+            }).join('; ') || 'Assembling…') + `</p>`;
+
+        // Show vote section if current user is an accepted member who hasn't voted
+        const myMembership = currentUser && members.find(m => m.user_id === currentUser.id && m.status === 'accepted' && !m.vote);
+        const voteSection = document.getElementById('arbitration-vote-section');
+        voteSection.style.display = myMembership && restriction.status === 'pending' ? 'block' : 'none';
+
+        // Show respond section if current user has a pending invitation
+        const myInvite = currentUser && members.find(m => m.user_id === currentUser.id && m.status === 'pending');
+        const respondSection = document.getElementById('arbitration-respond-section');
+        respondSection.style.display = myInvite ? 'block' : 'none';
+
+        // Render messages
+        const msgContainer = document.getElementById('arbitration-messages');
+        msgContainer.innerHTML = messages.map(m =>
+            `<div class="arb-msg"><strong>${m.username}:</strong> ${m.content} <small>${new Date(m.created_at).toLocaleTimeString()}</small></div>`
+        ).join('');
+        msgContainer.scrollTop = msgContainer.scrollHeight;
+
+        // Wire up vote buttons (remove old listeners by replacing nodes)
+        const voteClone = voteSection.cloneNode(true);
+        voteSection.parentNode.replaceChild(voteClone, voteSection);
+        voteClone.querySelectorAll('.arb-vote-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const vote = btn.getAttribute('data-vote');
+                const r = await fetch(`/api/arbitration/${panelId}/vote`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+                    body: JSON.stringify({ vote })
+                });
+                if (r.ok) { await refreshArbitrationModal(panelId); loadRestrictions(); }
+                else { const e = await r.json().catch(() => ({})); alert(e.error || 'Vote failed'); }
+            });
+        });
+
+        // Wire up respond buttons
+        const respondClone = respondSection.cloneNode(true);
+        respondSection.parentNode.replaceChild(respondClone, respondSection);
+        respondClone.querySelectorAll('.arb-respond-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const accept = btn.getAttribute('data-accept') === 'true';
+                const r = await fetch(`/api/arbitration/${panelId}/respond`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+                    body: JSON.stringify({ accept })
+                });
+                if (r.ok) { await refreshArbitrationModal(panelId); }
+                else { const e = await r.json().catch(() => ({})); alert(e.error || 'Failed'); }
+            });
+        });
+    } catch (e) {
+        console.error('refreshArbitrationModal error:', e);
+    }
+}
+
+// Modal close
+document.addEventListener('DOMContentLoaded', () => {
+    const closeBtn = document.getElementById('arbitration-modal-close');
+    if (closeBtn) closeBtn.addEventListener('click', () => {
+        document.getElementById('arbitration-modal').style.display = 'none';
+        currentArbitrationPanelId = null;
+    });
+
+    const sendBtn = document.getElementById('arbitration-msg-send');
+    const msgInput = document.getElementById('arbitration-msg-input');
+    if (sendBtn && msgInput) {
+        const sendMsg = async () => {
+            const content = msgInput.value.trim();
+            if (!content || !currentArbitrationPanelId) return;
+            msgInput.value = '';
+            const r = await fetch(`/api/arbitration/${currentArbitrationPanelId}/messages`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+                body: JSON.stringify({ content })
+            });
+            if (r.ok && currentArbitrationPanelId) await refreshArbitrationModal(currentArbitrationPanelId);
+        };
+        sendBtn.addEventListener('click', sendMsg);
+        msgInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendMsg(); });
+    }
+});
+
+// Listen for real-time arbitration messages and restriction updates
+document.addEventListener('DOMContentLoaded', () => {
+    // socket is defined later in the file; use a deferred hook
+    setTimeout(() => {
+        if (typeof socket !== 'undefined') {
+            socket.on('arbitration message', ({ panelId }) => {
+                if (panelId === currentArbitrationPanelId) refreshArbitrationModal(panelId);
+            });
+            socket.on('restrictions updated', () => {
+                const restrictionsTab = document.getElementById('restrictions');
+                if (restrictionsTab && restrictionsTab.classList.contains('active')) loadRestrictions();
+            });
+        }
+    }, 1000);
+});
