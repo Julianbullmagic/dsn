@@ -1249,3 +1249,11 @@ button:hover {
 }
 .credentials-block p:last-child { margin-bottom: 0; }
 .credentials-block strong { color: #7d6608; }
+
+.field-hint {
+    display: block;
+    margin-top: 0.3rem;
+    color: #666;
+    font-size: 0.85em;
+    line-height: 1.4;
+}

@@ -136,11 +136,11 @@ io.on('connection', (socket) => {
 app.post('/api/register', async (req, res) => {
     try {
         console.log('=== REGISTRATION ATTEMPT ===');
-        const { username, email, password } = req.body;
+        const { username, email, password, location } = req.body;
         console.log('Username provided:', username);
         console.log('Email provided:', email);
         console.log('Password provided:', password ? '***' : 'undefined');
-        
+
         // Validate input
         if (!username || !email || !password) {
             console.log('Validation failed: missing required fields');
@@ -204,7 +204,8 @@ app.post('/api/register', async (req, res) => {
                 {
                     username,
                     email: normalizedEmail,
-                    password: hashedPassword
+                    password: hashedPassword,
+                    location: location ? location.trim() : null
                 }
             ])
             .select()

@@ -41,3 +41,6 @@ CREATE TABLE IF NOT EXISTS arbitration_messages (
   content TEXT NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Add approximate location to users (run separately if users table already exists)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS location TEXT;
