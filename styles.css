@@ -1228,3 +1228,24 @@ button:hover {
     color: #333;
 }
 .arbitration-steps li strong { color: #1e8449; }
+
+/* Credentials / practical limitation block */
+.credentials-block {
+    padding: 1.75rem 2rem;
+    border-radius: 6px;
+    line-height: 1.7;
+    background: #fdfaf0;
+    border-left: 4px solid #b7950b;
+}
+.credentials-block h3 {
+    color: #7d6608;
+    margin-bottom: 1rem;
+    font-size: 1.15rem;
+}
+.credentials-block p {
+    margin-bottom: 1rem;
+    font-size: 1rem;
+    color: #333;
+}
+.credentials-block p:last-child { margin-bottom: 0; }
+.credentials-block strong { color: #7d6608; }
