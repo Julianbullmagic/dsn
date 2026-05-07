@@ -7,6 +7,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const { initSupabase } = require('./supabaseClient');
+const { encryptEmail, decryptEmail, hashEmail, encryptLocation, decryptLocation } = require('./encryption');
 
 const app = express();
 const server = http.createServer(app);
@@ -155,14 +156,14 @@ app.post('/api/register', async (req, res) => {
         // Convert email to lowercase for checking if user already exists
         console.log('Converting email to lowercase for database lookup...');
         const normalizedEmail = email.toLowerCase();
-        console.log('Normalized email:', normalizedEmail);
-        
-        // Check if user already exists
+        const emailHash = hashEmail(normalizedEmail);
+
+        // Check if user already exists (search by HMAC hash, not plaintext or ciphertext)
         console.log('Querying users table for existing user...');
         const { data: existingUsers, error: fetchError } = await supabase
             .from('users')
-            .select('*')
-            .or(`email.eq.${normalizedEmail},username.eq.${username}`);
+            .select('id')
+            .or(`email_hash.eq.${emailHash},username.eq.${username}`);
         
         console.log('Database query result:');
         console.log('- Error:', fetchError);
@@ -197,15 +198,16 @@ app.post('/api/register', async (req, res) => {
         console.log('Password hashed successfully');
         
         console.log('Inserting new user into database...');
-        // Insert user into database with normalized email
+        // Insert user with AES-encrypted email + HMAC hash for lookups + encrypted location
         const { data: newUser, error: insertError } = await supabase
             .from('users')
             .insert([
                 {
                     username,
-                    email: normalizedEmail,
+                    email: encryptEmail(normalizedEmail),
+                    email_hash: emailHash,
                     password: hashedPassword,
-                    location: location ? location.trim() : null
+                    location: location ? encryptLocation(location.trim()) : null
                 }
             ])
             .select()
@@ -283,14 +285,14 @@ app.post('/api/login', async (req, res) => {
         // Convert email to lowercase to search in database
         console.log('Converting email to lowercase for database lookup...');
         const normalizedEmail = email.toLowerCase();
-        console.log('Normalized email:', normalizedEmail);
-        
-        // Find user
+        const emailHash = hashEmail(normalizedEmail);
+
+        // Find user by HMAC hash (the encrypted email column is not searchable directly)
         console.log('Querying users table...');
         const { data: user, error } = await supabase
             .from('users')
             .select('*')
-            .eq('email', normalizedEmail)
+            .eq('email_hash', emailHash)
             .single();
         
         console.log('Database query result:');
@@ -319,6 +321,10 @@ app.post('/api/login', async (req, res) => {
             return res.status(401).json({ error: 'Invalid email or password' });
         }
         
+        // Decrypt the stored email so it can be used in the JWT and response
+        if (user && user.email) user.email = decryptEmail(user.email);
+        if (user && user.location) user.location = decryptLocation(user.location);
+
         console.log('User found, verifying password...');
         // Verify password
         const isValidPassword = await bcrypt.compare(password, user.password);
@@ -402,11 +408,11 @@ app.get('/api/verify-email', async (req, res) => {
             return res.status(400).send('Invalid or expired verification token');
         }
         
-        // Update user's email verification status in database
+        // Update user's email verification status in database (look up by HMAC hash)
         const { error } = await supabase
             .from('users')
             .update({ email_verified: true, email_verification_token: null })
-            .eq('email', decoded.email.toLowerCase());
+            .eq('email_hash', hashEmail(decoded.email.toLowerCase()));
         
         if (error) {
             console.error('Error updating email verification status:', error);
@@ -454,10 +460,10 @@ app.get('/api/referenda', async (req, res) => {
         const userIds = Array.from(new Set(vRows.map(v => v.user_id)));
         const { data: users, error: uErr } = await supabase
             .from('users')
-            .select('id, username, email')
+            .select('id, username')
             .in('id', userIds);
-        
-        const idToName = new Map((users || []).map(u => [u.id, u.username || u.email]));
+
+        const idToName = new Map((users || []).map(u => [u.id, u.username || 'User']));
 
         const refIdToYes = new Map();
         const refIdToNo = new Map();
@@ -588,10 +594,10 @@ app.get('/api/messages', async (req, res) => {
                 if (userIds.length > 0) {
                     const { data: usersList, error: usersErr } = await supabase
                         .from('users')
-                        .select('id, username, email')
+                        .select('id, username')
                         .in('id', userIds);
                     if (!usersErr && usersList) {
-                        usersList.forEach(u => { idToName[u.id] = u.username || u.email || 'User'; });
+                        usersList.forEach(u => { idToName[u.id] = u.username || 'User'; });
                     }
                 }
                 const enriched = (rows || []).map(r => ({ ...r, user: idToName[r.user_id] || 'Anonymous' }));
@@ -668,9 +674,9 @@ app.get('/api/elections/state', async (req, res) => {
         // votes: id, voter_id, candidate_id, created_at
         const { data: users, error: usersErr } = await supabase
             .from('users')
-            .select('id, username, email');
+            .select('id, username');
         if (usersErr) throw usersErr;
-        
+
         const decryptedUsers = users || [];
 
         const { data: votes, error: votesErr } = await supabase
@@ -679,7 +685,7 @@ app.get('/api/elections/state', async (req, res) => {
         // If table missing, fallback to empty
         const voteRows = votesErr ? [] : (votes || []);
 
-        const idToName = new Map(decryptedUsers.map(u => [u.id, u.username || u.email]));
+        const idToName = new Map(decryptedUsers.map(u => [u.id, u.username || 'User']));
         const candidateToVoters = new Map();
         const counts = new Map();
         let myVoteCandidateId = null;
@@ -694,8 +700,7 @@ app.get('/api/elections/state', async (req, res) => {
         }
         const usersWithCounts = decryptedUsers.map(u => ({
             id: u.id,
-            username: u.username || u.email,
-            email: u.email,
+            username: u.username || 'User',
             votes: counts.get(u.id) || 0,
             voters: (candidateToVoters.get(u.id) || []).sort()
         }));
@@ -794,10 +799,10 @@ app.get('/api/suggestions', async (req, res) => {
         const userIds = Array.from(new Set(voteRows.map(v => v.user_id)));
         const { data: users, error: uErr } = await supabase
             .from('users')
-            .select('id, username, email')
+            .select('id, username')
             .in('id', userIds);
-        
-        const idToName = new Map((users || []).map(u => [u.id, u.username || u.email]));
+
+        const idToName = new Map((users || []).map(u => [u.id, u.username || 'User']));
 
         const sugIdToVoters = new Map();
         for (const v of voteRows) {
@@ -987,12 +992,12 @@ const MAX_TENURE_MS = 4 * 365.25 * 24 * 60 * 60 * 1000;
 // Helper: compute top 2 admins by votes (tenure-aware — excludes users who exceeded 4-year limit)
 async function computeAdminLeaders() {
     try {
-        const { data: users } = await supabase.from('users').select('id, username, email');
+        const { data: users } = await supabase.from('users').select('id, username');
         const { data: votes } = await supabase.from('admin_votes').select('candidate_id');
         const counts = new Map();
         (votes || []).forEach(v => counts.set(v.candidate_id, (counts.get(v.candidate_id) || 0) + 1));
 
-        const arr = (users || []).map(u => ({ id: u.id, name: u.username || u.email, votes: counts.get(u.id) || 0 }));
+        const arr = (users || []).map(u => ({ id: u.id, name: u.username || 'User', votes: counts.get(u.id) || 0 }));
 
         // Try to check tenure limits (gracefully degrade if table doesn't exist)
         try {
@@ -1165,7 +1170,7 @@ async function getLeaderTenureData() {
     try {
         if (!supabase || supabase.__mock) return { users: [], rotationQueue: [] };
 
-        const { data: users } = await supabase.from('users').select('id, username, email');
+        const { data: users } = await supabase.from('users').select('id, username');
         const { data: tenures, error } = await supabase
             .from('leader_tenure')
             .select('id, user_id, started_at, ended_at')
@@ -1192,8 +1197,7 @@ async function getLeaderTenureData() {
 
         const allUsers = (users || []).map(u => ({
             id: u.id,
-            username: u.username || u.email,
-            email: u.email,
+            username: u.username || 'User',
             totalTenureMs: userTenures.get(u.id)?.totalMs || 0,
             activeTenure: userTenures.get(u.id)?.activeTenure || null,
             tenureCount: userTenures.get(u.id)?.tenureCount || 0,
@@ -1222,7 +1226,7 @@ async function sendAdminChangeNotification(admins) {
         }
         notificationGuard.lastAdminNotify = { ids, ts: now };
         const { data: allUsers } = await supabase.from('users').select('email');
-        const toList = (allUsers || []).map(u => u.email).join(',');
+        const toList = (allUsers || []).map(u => decryptEmail(u.email)).filter(Boolean).join(',');
         const subject = 'Admin Update - Democratic Social Network';
         const body = `
             <h2>Admin Update</h2>
@@ -1253,21 +1257,17 @@ app.get('/api/users', async (req, res) => {
     try {
         const { data, error } = await supabase
             .from('users')
-            .select('*')
+            .select('id, username, created_at, admin_votes, is_banned, email_verified, location')
             .order('created_at', { ascending: true });
-        
+
         if (error) throw error;
-        
-        const decryptedUsers = data || [];
-        
-        // In a real implementation, you would have a separate table for admin votes
-        // For now, we'll simulate admin votes
-        const usersWithVotes = decryptedUsers.map(user => ({
-            ...user,
-            admin_votes: Math.floor(Math.random() * 20) // Random votes for demo
+
+        const safeUsers = (data || []).map(u => ({
+            ...u,
+            location: u.location ? decryptLocation(u.location) : null
         }));
-        
-        res.json(usersWithVotes);
+
+        res.json(safeUsers);
     } catch (error) {
         console.error('Error fetching users:', error);
         // Fallback to mock data
@@ -1439,7 +1439,7 @@ async function sendLeadNotification(lead) {
         if (!users || users.length === 0) return;
 
         // Build or refresh round-robin queue: ensure each user gets one before repeats
-        const allEmails = (users || []).map(u => u.email).filter(Boolean);
+        const allEmails = (users || []).map(u => decryptEmail(u.email)).filter(Boolean);
         // Initialize queue if empty or if unknown emails
         if (!notificationGuard.leadRRQueue.length) {
             // Randomize initial order
@@ -1529,7 +1529,7 @@ async function sendReferendumApprovalNotification(suggestion) {
         
         const mailOptions = {
             from: process.env.EMAIL_USER || 'noreply@democratic-social-network.com',
-            to: (users || []).map(user => user.email).join(','),
+            to: (users || []).map(u => decryptEmail(u.email)).filter(Boolean).join(','),
             subject: 'New Referendum Approved - Democratic Social Network',
             html: `
                 <h2>New Referendum Approved</h2>
@@ -1558,7 +1558,7 @@ async function sendReferendumPassedNotification(referendum) {
         
         const mailOptions = {
             from: process.env.EMAIL_USER || 'noreply@democratic-social-network.com',
-            to: (users || []).map(user => user.email).join(','),
+            to: (users || []).map(u => decryptEmail(u.email)).filter(Boolean).join(','),
             subject: 'Referendum Approved - Democratic Social Network',
             html: `
                 <h2>Referendum Approved</h2>

@@ -1,69 +1,58 @@
 const CryptoJS = require('crypto-js');
+const crypto = require('crypto');
 
-// Get encryption key from environment variables
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'democratic_social_network_default_encryption_key';
 
-/**
- * Encrypts a string using AES encryption
- * @param {string} text - The text to encrypt
- * @returns {string} - The encrypted text
- */
 function encrypt(text) {
     if (!text) return text;
-    
     try {
-        const encrypted = CryptoJS.AES.encrypt(text, ENCRYPTION_KEY).toString();
-        return encrypted;
+        return CryptoJS.AES.encrypt(text, ENCRYPTION_KEY).toString();
     } catch (error) {
         console.error('Encryption error:', error);
         throw new Error('Failed to encrypt data');
     }
 }
 
-/**
- * Decrypts a string using AES decryption
- * @param {string} encryptedText - The encrypted text to decrypt
- * @returns {string} - The decrypted text
- */
 function decrypt(encryptedText) {
     if (!encryptedText) return encryptedText;
-    
     try {
         const bytes = CryptoJS.AES.decrypt(encryptedText, ENCRYPTION_KEY);
         const decrypted = bytes.toString(CryptoJS.enc.Utf8);
-        return decrypted;
+        // If decryption returns empty, the value was probably not encrypted — return as-is
+        return decrypted || encryptedText;
     } catch (error) {
-        console.error('Decryption error:', error);
-        throw new Error('Failed to decrypt data');
+        // Return original value for backward compatibility with unencrypted rows
+        return encryptedText;
     }
 }
 
-/**
- * Encrypts an email address
- * @param {string} email - The email to encrypt
- * @returns {string} - The encrypted email
- */
+// HMAC-SHA256 of the email for deterministic database lookups.
+// AES produces a different ciphertext each time (random IV), so we can't
+// search the encrypted column directly — we store this hash alongside it.
+function hashEmail(email) {
+    if (!email) return email;
+    const hmacKey = process.env.EMAIL_HASH_KEY || ENCRYPTION_KEY;
+    return crypto.createHmac('sha256', hmacKey).update(email.toLowerCase()).digest('hex');
+}
+
 function encryptEmail(email) {
     return encrypt(email);
 }
 
-/**
- * Decrypts an email address
- * @param {string} encryptedEmail - The encrypted email to decrypt
- * @returns {string} - The decrypted email
- */
 function decryptEmail(encryptedEmail) {
     return decrypt(encryptedEmail);
 }
 
-/**
- * Encrypts user object emails
- * @param {object} user - The user object
- * @returns {object} - User object with encrypted email
- */
+function encryptLocation(location) {
+    return encrypt(location);
+}
+
+function decryptLocation(encryptedLocation) {
+    return decrypt(encryptedLocation);
+}
+
 function encryptUserEmail(user) {
     if (!user) return user;
-    
     const encryptedUser = { ...user };
     if (encryptedUser.email) {
         encryptedUser.email = encryptEmail(encryptedUser.email);
@@ -71,14 +60,8 @@ function encryptUserEmail(user) {
     return encryptedUser;
 }
 
-/**
- * Decrypts user object emails
- * @param {object} user - The user object with encrypted email
- * @returns {object} - User object with decrypted email
- */
 function decryptUserEmail(user) {
     if (!user) return user;
-    
     const decryptedUser = { ...user };
     if (decryptedUser.email) {
         decryptedUser.email = decryptEmail(decryptedUser.email);
@@ -86,22 +69,19 @@ function decryptUserEmail(user) {
     return decryptedUser;
 }
 
-/**
- * Decrypts emails in an array of users
- * @param {array} users - Array of user objects with encrypted emails
- * @returns {array} - Array of user objects with decrypted emails
- */
 function decryptUsersEmails(users) {
     if (!Array.isArray(users)) return users;
-    
     return users.map(user => decryptUserEmail(user));
 }
 
 module.exports = {
     encrypt,
     decrypt,
+    hashEmail,
     encryptEmail,
     decryptEmail,
+    encryptLocation,
+    decryptLocation,
     encryptUserEmail,
     decryptUserEmail,
     decryptUsersEmails

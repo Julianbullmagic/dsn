@@ -1,66 +1,83 @@
--- Migration script to encrypt existing emails in the database
--- Run this script once after implementing email encryption
+-- ============================================================
+-- Migration: encrypt existing plaintext emails & locations
+-- ============================================================
+-- Step 1 — add the email_hash column (idempotent; also in enable-rls.sql)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_hash TEXT UNIQUE;
 
--- Step 1: Add a temporary column to store encrypted emails
-ALTER TABLE users ADD COLUMN email_encrypted TEXT;
+-- Step 2 — run the Node.js script below to populate email_hash and
+--           replace plaintext email / location values with ciphertext.
+--
+-- Run with:  node migrate-encrypted-emails.js
+-- (Requires ENCRYPTION_KEY and EMAIL_HASH_KEY env vars to match server.js)
 
--- Step 2: Update existing users with encrypted emails
--- Note: This needs to be done in the application code since we need to use the encryption key
--- The following is a placeholder - you should run this through your application
-
--- Example application code (run this in Node.js with your encryption utilities):
 /*
-const { encryptEmail } = require('./encryption');
+  ── migrate-encrypted-emails.js ──────────────────────────────────────────
+  Save as migrate-encrypted-emails.js, then:
+    node -r dotenv/config migrate-encrypted-emails.js
+
+const { encryptEmail, hashEmail, encryptLocation, decryptEmail } = require('./encryption');
 const { initSupabase } = require('./supabaseClient');
 
-async function migrateEmails() {
+async function main() {
     const supabase = await initSupabase();
-    
-    // Get all users with unencrypted emails
+
     const { data: users, error } = await supabase
         .from('users')
-        .select('id, email')
-        .is('email_encrypted', null);
-    
-    if (error) {
-        console.error('Error fetching users:', error);
-        return;
-    }
-    
-    console.log(`Found ${users.length} users to migrate`);
-    
+        .select('id, email, location');
+
+    if (error) { console.error('Fetch error:', error); process.exit(1); }
+
+    console.log(`Migrating ${users.length} users...`);
+    let ok = 0, skip = 0, fail = 0;
+
     for (const user of users) {
-        try {
-            const encryptedEmail = encryptEmail(user.email);
-            
-            const { error: updateError } = await supabase
-                .from('users')
-                .update({ email_encrypted: encryptedEmail })
-                .eq('id', user.id);
-            
-            if (updateError) {
-                console.error(`Error updating user ${user.id}:`, updateError);
+        // Detect already-encrypted rows: CryptoJS ciphertext is base64
+        // and always much longer than a real email address.
+        const looksEncrypted = user.email && user.email.length > 80 && !user.email.includes('@');
+
+        if (looksEncrypted) {
+            // Row already encrypted — just populate the hash if missing.
+            if (!user.email_hash) {
+                // We cannot recover the plaintext to hash it, so skip.
+                // Re-run after a fresh registration or manual reset.
+                console.warn(`  SKIP  ${user.id} — already encrypted, hash missing`);
+                skip++;
             } else {
-                console.log(`Migrated user ${user.id}: ${user.email} -> ${encryptedEmail.substring(0, 20)}...`);
+                skip++;
             }
+            continue;
+        }
+
+        try {
+            const plainEmail    = user.email.toLowerCase();
+            const encryptedEmail = encryptEmail(plainEmail);
+            const emailHash      = hashEmail(plainEmail);
+            const encryptedLoc   = user.location ? encryptLocation(user.location) : null;
+
+            const { error: upErr } = await supabase
+                .from('users')
+                .update({
+                    email:      encryptedEmail,
+                    email_hash: emailHash,
+                    location:   encryptedLoc
+                })
+                .eq('id', user.id);
+
+            if (upErr) throw upErr;
+            console.log(`  OK    ${user.id}  ${plainEmail}`);
+            ok++;
         } catch (e) {
-            console.error(`Error encrypting email for user ${user.id}:`, e);
+            console.error(`  FAIL  ${user.id}:`, e.message);
+            fail++;
         }
     }
-    
-    console.log('Migration completed');
+
+    console.log(`\nDone. ok=${ok}  skip=${skip}  fail=${fail}`);
 }
 
-migrateEmails();
+main();
 */
 
--- Step 3: After running the application code above, run these SQL commands:
-
--- Replace the original email column with encrypted emails
-UPDATE users SET email = email_encrypted WHERE email_encrypted IS NOT NULL;
-
--- Drop the temporary column
-ALTER TABLE users DROP COLUMN email_encrypted;
-
--- Step 4: Update the table comment to indicate emails are encrypted
-COMMENT ON COLUMN users.email IS 'Encrypted email address using AES encryption';
+-- Step 3 — after the script completes, verify no plaintext emails remain:
+-- SELECT id, email FROM users WHERE email LIKE '%@%';
+-- The result should be empty (all rows now hold ciphertext, not raw addresses).
